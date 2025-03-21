@@ -20,7 +20,7 @@ class SentimentAnalyzer:
         self.train()
 
     def load_training_data(self):
-        """Load training data from file"""
+        # Load training data from file
         training_data = [
             ("I absolutely love this product!", "positive"),
             ("This is the best day ever!", "positive"),
@@ -43,13 +43,13 @@ class SentimentAnalyzer:
             self.sentiment_data[sentiment].append(text.lower())
 
     def preprocess_text(self, text: str) -> str:
-        """Clean and preprocess text"""
+        # Clean and preprocess text
         text = text.lower()
         text = re.sub(r'[^a-zA-Z\s]', '', text)
         return text
 
     def get_ngrams(self, text: str, n: int) -> List[str]:
-        """Generate n-grams from text"""
+        # Generate n-grams from text
         words = self.preprocess_text(text).split()
         ngrams = []
         for i in range(len(words) - n + 1):
@@ -58,7 +58,7 @@ class SentimentAnalyzer:
         return ngrams
 
     def train(self):
-        """Train the model using bigrams and trigrams"""
+        # Train the model using bigrams and trigrams
         for sentiment, texts in self.sentiment_data.items():
             for text in texts:
                 # Process bigrams
@@ -72,7 +72,7 @@ class SentimentAnalyzer:
                     self.ngram_counts['trigram'][sentiment][trigram] += 1
 
     def analyze_sentiment(self, text: str) -> Dict[str, float]:
-        """Analyze sentiment of input text"""
+        # Analyze sentiment of input text
         bigrams = self.get_ngrams(text, 2)
         trigrams = self.get_ngrams(text, 3)
         
@@ -112,24 +112,24 @@ class SentimentAnalyzer:
         return normalized_scores
 
     def get_final_sentiment(self, scores: Dict[str, float]) -> Tuple[str, float]:
-        """Determine final sentiment based on highest score"""
+        # Determine final sentiment based on highest score
         final_sentiment = max(scores.items(), key=lambda x: x[1])
         return final_sentiment
 
     def add_to_training_data(self, text: str, sentiment: str):
-        """Add new text to training data and retrain the model"""
+        # Add new text to training data and retrain the model
         self.sentiment_data[sentiment].append(text.lower())
         self.train()
 
     def export_training_data(self, filepath: str):
-        """Export training data to a file"""
+        # Export training data to a file
         with open(filepath, 'w') as file:
             for sentiment, texts in self.sentiment_data.items():
                 for text in texts:
                     file.write(f"{text}\t{sentiment}\n")
 
     def import_training_data(self, filepath: str):
-        """Import training data from a file"""
+        # Import training data from a file
         with open(filepath, 'r') as file:
             for line in file:
                 text, sentiment = line.strip().split('\t')
@@ -137,7 +137,7 @@ class SentimentAnalyzer:
         self.train()
 
     def get_training_data(self) -> List[Tuple[str, str]]:
-        """Get the training data as a list of tuples"""
+        # Get the training data as a list of tuples
         training_data = []
         for sentiment, texts in self.sentiment_data.items():
             for text in texts:
