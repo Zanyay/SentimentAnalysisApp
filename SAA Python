@@ -1,0 +1,270 @@
+import re
+from collections import defaultdict
+from typing import List, Dict, Tuple
+import tkinter as tk
+from tkinter import messagebox, filedialog
+from tkinter import ttk
+
+class SentimentAnalyzer:
+    def __init__(self):
+        self.sentiment_data = {
+            'positive': [],
+            'neutral': [],
+            'negative': []
+        }
+        self.ngram_counts = {
+            'bigram': defaultdict(lambda: defaultdict(int)),
+            'trigram': defaultdict(lambda: defaultdict(int))
+        }
+        self.load_training_data()
+        self.train()
+
+    def load_training_data(self):
+        """Load training data from file"""
+        training_data = [
+            ("I absolutely love this product!", "positive"),
+            ("This is the best day ever!", "positive"),
+            ("Great service and amazing quality", "positive"),
+            ("The weather is okay today", "neutral"),
+            ("I'm not sure how I feel about this", "neutral"),
+            ("It could be better but it's not terrible", "neutral"),
+            ("This is terrible, I hate it", "negative"),
+            ("Worst experience ever, very disappointing", "negative"),
+            ("Poor quality and bad service", "negative"),
+            ("I love my phone", "positive"),
+            ("I hate my phone", "negative"),
+            ("My phone is okay", "neutral"),
+            ("I am very happy with my purchase", "positive"),
+            ("I am very unhappy with my purchase", "negative"),
+            ("The product is average", "neutral")
+        ]
+
+        for text, sentiment in training_data:
+            self.sentiment_data[sentiment].append(text.lower())
+
+    def preprocess_text(self, text: str) -> str:
+        """Clean and preprocess text"""
+        text = text.lower()
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        return text
+
+    def get_ngrams(self, text: str, n: int) -> List[str]:
+        """Generate n-grams from text"""
+        words = self.preprocess_text(text).split()
+        ngrams = []
+        for i in range(len(words) - n + 1):
+            ngram = ' '.join(words[i:i + n])
+            ngrams.append(ngram)
+        return ngrams
+
+    def train(self):
+        """Train the model using bigrams and trigrams"""
+        for sentiment, texts in self.sentiment_data.items():
+            for text in texts:
+                # Process bigrams
+                bigrams = self.get_ngrams(text, 2)
+                for bigram in bigrams:
+                    self.ngram_counts['bigram'][sentiment][bigram] += 1
+
+                # Process trigrams
+                trigrams = self.get_ngrams(text, 3)
+                for trigram in trigrams:
+                    self.ngram_counts['trigram'][sentiment][trigram] += 1
+
+    def analyze_sentiment(self, text: str) -> Dict[str, float]:
+        """Analyze sentiment of input text"""
+        bigrams = self.get_ngrams(text, 2)
+        trigrams = self.get_ngrams(text, 3)
+        
+        scores = {
+            'positive': 0.0,
+            'neutral': 0.0,
+            'negative': 0.0
+        }
+
+        # Weight for combining bigram and trigram scores
+        bigram_weight = 0.5
+        trigram_weight = 0.5
+
+        # Calculate bigram scores
+        for bigram in bigrams:
+            for sentiment in scores.keys():
+                if bigram in self.ngram_counts['bigram'][sentiment]:
+                    scores[sentiment] += self.ngram_counts['bigram'][sentiment][bigram] * bigram_weight
+
+        # Calculate trigram scores
+        for trigram in trigrams:
+            for sentiment in scores.keys():
+                if trigram in self.ngram_counts['trigram'][sentiment]:
+                    scores[sentiment] += self.ngram_counts['trigram'][sentiment][trigram] * trigram_weight
+
+        # Fallback mechanism if no n-grams match
+        if sum(scores.values()) == 0:
+            scores['neutral'] = 1.0
+
+        # Normalize scores
+        total_score = sum(scores.values()) or 1
+        normalized_scores = {
+            sentiment: (score / total_score) * 100 
+            for sentiment, score in scores.items()
+        }
+
+        return normalized_scores
+
+    def get_final_sentiment(self, scores: Dict[str, float]) -> Tuple[str, float]:
+        """Determine final sentiment based on highest score"""
+        final_sentiment = max(scores.items(), key=lambda x: x[1])
+        return final_sentiment
+
+    def add_to_training_data(self, text: str, sentiment: str):
+        """Add new text to training data and retrain the model"""
+        self.sentiment_data[sentiment].append(text.lower())
+        self.train()
+
+    def export_training_data(self, filepath: str):
+        """Export training data to a file"""
+        with open(filepath, 'w') as file:
+            for sentiment, texts in self.sentiment_data.items():
+                for text in texts:
+                    file.write(f"{text}\t{sentiment}\n")
+
+    def import_training_data(self, filepath: str):
+        """Import training data from a file"""
+        with open(filepath, 'r') as file:
+            for line in file:
+                text, sentiment = line.strip().split('\t')
+                self.sentiment_data[sentiment].append(text.lower())
+        self.train()
+
+    def get_training_data(self) -> List[Tuple[str, str]]:
+        """Get the training data as a list of tuples"""
+        training_data = []
+        for sentiment, texts in self.sentiment_data.items():
+            for text in texts:
+                training_data.append((text, sentiment))
+        return training_data
+
+def analyze_text():
+    global last_analyzed_text
+    text = text_entry.get("1.0", tk.END).strip()
+    if not text:
+        messagebox.showwarning("Input Error", "Please enter some text to analyze.")
+        return
+
+    # Analyze sentiment
+    scores = analyzer.analyze_sentiment(text)
+    final_sentiment, confidence = analyzer.get_final_sentiment(scores)
+
+    # Display results
+    result_text = f"Sentiment Analysis Results:\n{'-' * 25}\nText: {text}\n\nDetailed Scores:\n"
+    for sentiment, score in scores.items():
+        result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+    result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
+    result_label.config(text=result_text)
+
+    # Store the last analyzed text
+    last_analyzed_text = text
+
+    # Clear the text box
+    text_entry.delete("1.0", tk.END)
+
+def add_to_training():
+    global last_analyzed_text
+    if not last_analyzed_text:
+        messagebox.showwarning("Input Error", "No text has been analyzed yet.")
+        return
+
+    sentiment = sentiment_var.get()
+    if sentiment not in ['positive', 'neutral', 'negative']:
+        messagebox.showwarning("Input Error", "Please select a sentiment.")
+        return
+
+    analyzer.add_to_training_data(last_analyzed_text, sentiment)
+    messagebox.showinfo("Success", "Text added to training data successfully.")
+    update_training_data_view()
+
+def export_training_data():
+    filepath = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+    if filepath:
+        analyzer.export_training_data(filepath)
+        messagebox.showinfo("Success", "Training data exported successfully.")
+
+def import_training_data():
+    filepath = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+    if filepath:
+        analyzer.import_training_data(filepath)
+        messagebox.showinfo("Success", "Training data imported successfully.")
+        update_training_data_view()
+
+def update_training_data_view():
+    training_data = analyzer.get_training_data()
+    training_data_text = "\n".join([f"{text} - {sentiment}" for text, sentiment in training_data])
+    training_data_textbox.config(state=tk.NORMAL)
+    training_data_textbox.delete("1.0", tk.END)
+    training_data_textbox.insert(tk.END, training_data_text)
+    training_data_textbox.config(state=tk.DISABLED)
+
+# Initialize analyzer
+analyzer = SentimentAnalyzer()
+last_analyzed_text = ""
+
+# Create the main window
+root = tk.Tk()
+root.title("Sentiment Analyzer")
+
+# Create a tabbed interface
+tab_control = ttk.Notebook(root)
+tab1 = ttk.Frame(tab_control)
+tab2 = ttk.Frame(tab_control)
+tab_control.add(tab1, text="Sentiment Analysis")
+tab_control.add(tab2, text="Training Data")
+tab_control.pack(expand=1, fill="both")
+
+# Tab 1: Sentiment Analysis
+tk.Label(tab1, text="Enter text to analyze:").pack(pady=10)
+text_entry = tk.Text(tab1, height=10, width=50)
+text_entry.pack(pady=10)
+analyze_button = tk.Button(tab1, text="Analyze Sentiment", command=analyze_text)
+analyze_button.pack(pady=10)
+
+result_label = tk.Label(tab1, text="", justify=tk.LEFT)
+result_label.pack(pady=10)
+
+# Create a frame for the buttons and sentiment selection
+top_frame = tk.Frame(tab1)
+top_frame.pack(pady=10)
+
+# Add text above the sentiment selection
+tk.Label(top_frame, text="Add results to training data as:").pack(side=tk.TOP)
+
+# Add sentiment selection for training data
+sentiment_var = tk.StringVar(value="neutral")
+tk.Radiobutton(top_frame, text="Positive", variable=sentiment_var, value="positive").pack(side=tk.TOP)
+tk.Radiobutton(top_frame, text="Neutral", variable=sentiment_var, value="neutral").pack(side=tk.TOP)
+tk.Radiobutton(top_frame, text="Negative", variable=sentiment_var, value="negative").pack(side=tk.TOP)
+
+add_button = tk.Button(top_frame, text="Add results", command=add_to_training)
+add_button.pack(side=tk.TOP, pady=5)
+
+# Create a frame for the import and export buttons at the bottom
+bottom_frame = tk.Frame(tab1)
+bottom_frame.pack(side=tk.BOTTOM, pady=10)
+
+import_export_frame = tk.Frame(bottom_frame)
+import_export_frame.pack(side=tk.TOP, pady=5)
+
+export_button = tk.Button(import_export_frame, text="Export Training Data", command=export_training_data)
+export_button.pack(side=tk.LEFT, padx=5)
+
+import_button = tk.Button(import_export_frame, text="Import Training Data", command=import_training_data)
+import_button.pack(side=tk.LEFT, padx=5)
+
+# Tab 2: Training Data
+training_data_textbox = tk.Text(tab2, height=20, width=80, state=tk.DISABLED)
+training_data_textbox.pack(pady=10)
+
+# Update the training data view initially
+update_training_data_view()
+
+# Start the main event loop
+root.mainloop()
