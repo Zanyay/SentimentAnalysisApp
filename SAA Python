@@ -4,6 +4,8 @@ from typing import List, Dict, Tuple
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import ttk
+import speech_recognition as sr
+from pathlib import Path
 
 class SentimentAnalyzer:
     def __init__(self):
@@ -83,8 +85,8 @@ class SentimentAnalyzer:
         }
 
         # Weight for combining bigram and trigram scores
-        bigram_weight = 0.5
-        trigram_weight = 0.5
+        bigram_weight = 0.75
+        trigram_weight = 0.25
 
         # Calculate bigram scores
         for bigram in bigrams:
@@ -216,8 +218,10 @@ root.title("Sentiment Analyzer")
 tab_control = ttk.Notebook(root)
 tab1 = ttk.Frame(tab_control)
 tab2 = ttk.Frame(tab_control)
-tab_control.add(tab1, text="Sentiment Analysis")
-tab_control.add(tab2, text="Training Data")
+tab3 = ttk.Frame(tab_control)
+tab_control.add(tab3, text="Audio Analysis")      # Changed order - Audio first
+tab_control.add(tab1, text="Text Analysis")  # Text analysis second
+tab_control.add(tab2, text="Training Data")       # Training data last
 tab_control.pack(expand=1, fill="both")
 
 # Tab 1: Sentiment Analysis
@@ -265,6 +269,145 @@ training_data_textbox.pack(pady=10)
 
 # Update the training data view initially
 update_training_data_view()
+
+def process_audio_file():
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Audio Files", "*.wav *.mp3 *.ogg *.m4a")]  # Allow more audio formats
+    )
+    if not file_path:
+        return
+    
+    # Check if file exists
+    if not Path(file_path).exists():
+        messagebox.showerror("Error", f"File not found: {file_path}")
+        audio_status_label.config(text="Error: File not found")
+        return
+        
+    # Debug info
+    print(f"Selected file: {file_path}")
+    print(f"File exists: {Path(file_path).exists()}")
+    print(f"File size: {Path(file_path).stat().st_size} bytes")
+    
+    audio_status_label.config(text=f"Processing audio file: {Path(file_path).name}")
+    root.update()
+    
+    try:
+        # Initialize recognizer with specific settings
+        r = sr.Recognizer()
+        r.energy_threshold = 4000
+        r.dynamic_energy_threshold = True
+        
+        # Load the audio file
+        try:
+            with sr.AudioFile(file_path) as source:
+                print("Audio file opened successfully")
+                # Adjust for ambient noise
+                r.adjust_for_ambient_noise(source)
+                print("Ambient noise adjustment complete")
+                audio = r.record(source)
+                print("Audio recording complete")
+        except Exception as e:
+            print(f"Error opening audio file: {str(e)}")
+            raise
+            
+        try:
+            # Convert speech to text
+            text = r.recognize_google(audio)
+            
+            # Display the transcribed text
+            audio_text_display.config(state=tk.NORMAL)
+            audio_text_display.delete(1.0, tk.END)
+            audio_text_display.insert(tk.END, text)
+            audio_text_display.config(state=tk.DISABLED)
+            
+            # Only proceed with sentiment analysis if we have text
+            if text.strip():
+                # Analyze sentiment
+                scores = analyzer.analyze_sentiment(text)
+                final_sentiment, confidence = analyzer.get_final_sentiment(scores)
+                
+                # Display results
+                result_text = f"Sentiment Analysis Results:\n{'-' * 25}\n\nDetailed Scores:\n"
+                for sentiment, score in scores.items():
+                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
+                
+                audio_result_label.config(text=result_text)
+                audio_status_label.config(text="Analysis complete!")
+            else:
+                audio_status_label.config(text="No speech detected in audio")
+                
+        except sr.UnknownValueError:
+            messagebox.showerror("Error", "Could not understand the audio. Please ensure the audio is clear and contains speech.")
+            audio_status_label.config(text="Error: Could not understand the audio")
+        except sr.RequestError as e:
+            messagebox.showerror("Error", f"Could not connect to the speech recognition service: {str(e)}")
+            audio_status_label.config(text="Error: Service connection failed")
+            
+    except Exception as e:
+        messagebox.showerror("Error", f"An error occurred while processing the audio file: {str(e)}")
+        audio_status_label.config(text="Error: Processing failed")
+        print(f"Detailed error: {str(e)}")  # For debugging
+
+# Tab 3: Audio Analysis
+tk.Label(tab3, text="Select an audio file for analysis:").pack(pady=10)
+audio_button = tk.Button(tab3, text="Choose Audio File", command=process_audio_file)
+audio_button.pack(pady=10)
+
+audio_status_label = tk.Label(tab3, text="No file selected")
+audio_status_label.pack(pady=5)
+
+tk.Label(tab3, text="Transcribed Text:").pack(pady=5)
+audio_text_display = tk.Text(tab3, height=8, width=50, state=tk.DISABLED)
+audio_text_display.pack(pady=10)
+
+audio_result_label = tk.Label(tab3, text="", justify=tk.LEFT)
+audio_result_label.pack(pady=10)
+
+# Add training controls to Audio tab
+audio_top_frame = tk.Frame(tab3)
+audio_top_frame.pack(pady=10)
+
+# Add text above the sentiment selection
+tk.Label(audio_top_frame, text="Add results to training data as:").pack(side=tk.TOP)
+
+# Add sentiment selection for training data
+audio_sentiment_var = tk.StringVar(value="neutral")
+tk.Radiobutton(audio_top_frame, text="Positive", variable=audio_sentiment_var, value="positive").pack(side=tk.TOP)
+tk.Radiobutton(audio_top_frame, text="Neutral", variable=audio_sentiment_var, value="neutral").pack(side=tk.TOP)
+tk.Radiobutton(audio_top_frame, text="Negative", variable=audio_sentiment_var, value="negative").pack(side=tk.TOP)
+
+audio_add_button = tk.Button(audio_top_frame, text="Add results", command=lambda: add_to_training_from_audio())
+audio_add_button.pack(side=tk.TOP, pady=5)
+
+# Create a frame for the import and export buttons at the bottom
+audio_bottom_frame = tk.Frame(tab3)
+audio_bottom_frame.pack(side=tk.BOTTOM, pady=10)
+
+audio_import_export_frame = tk.Frame(audio_bottom_frame)
+audio_import_export_frame.pack(side=tk.TOP, pady=5)
+
+audio_export_button = tk.Button(audio_import_export_frame, text="Export Training Data", command=export_training_data)
+audio_export_button.pack(side=tk.LEFT, padx=5)
+
+audio_import_button = tk.Button(audio_import_export_frame, text="Import Training Data", command=import_training_data)
+audio_import_button.pack(side=tk.LEFT, padx=5)
+
+# Add new function to handle adding audio transcription to training data
+def add_to_training_from_audio():
+    text = audio_text_display.get("1.0", tk.END).strip()
+    if not text:
+        messagebox.showwarning("Input Error", "No text has been transcribed yet.")
+        return
+
+    sentiment = audio_sentiment_var.get()
+    if sentiment not in ['positive', 'neutral', 'negative']:
+        messagebox.showwarning("Input Error", "Please select a sentiment.")
+        return
+
+    analyzer.add_to_training_data(text, sentiment)
+    messagebox.showinfo("Success", "Text added to training data successfully.")
+    update_training_data_view()
 
 # Start the main event loop
 root.mainloop()
