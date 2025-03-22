@@ -409,5 +409,142 @@ def add_to_training_from_audio():
     messagebox.showinfo("Success", "Text added to training data successfully.")
     update_training_data_view()
 
+def create_about_tab(tab):
+    # Create a scrollable frame
+    canvas = tk.Canvas(tab)
+    scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
+    scrollable_frame = ttk.Frame(canvas)
+
+    scrollable_frame.bind(
+        "<Configure>",
+        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+
+    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    # Title
+    title = ttk.Label(
+        scrollable_frame,
+        text="About the Sentiment Analyzer",
+        font=("Helvetica", 14, "bold")
+    )
+    title.pack(pady=10)
+
+    # What is Sentiment Analysis section
+    what_is = ttk.LabelFrame(scrollable_frame, text="What is Sentiment Analysis?")
+    ttk.Label(
+        what_is,
+        text="Sentiment analysis is the process of determining the emotional tone behind "
+             "a piece of text. This tool provides two different approaches to sentiment analysis:",
+        wraplength=500
+    ).pack(pady=5)
+    
+    approaches = ttk.Frame(what_is)
+    ttk.Label(approaches, text="• Naive Bayes Classification (word-based)").pack(anchor="w")
+    ttk.Label(approaches, text="• N-gram Analysis (phrase-based)").pack(anchor="w")
+    approaches.pack(pady=5)
+    what_is.pack(fill="x", padx=10, pady=5)
+
+    # Naive Bayes Analysis section
+    naive_bayes = ttk.LabelFrame(scrollable_frame, text="Naive Bayes Analysis")
+    ttk.Label(
+        naive_bayes,
+        text="The Naive Bayes classifier uses Bayes' Theorem with a \"naive\" assumption "
+             "of independence between words. The mathematical formula is:",
+        wraplength=500
+    ).pack(pady=5)
+    
+    formula = ttk.Label(
+        naive_bayes,
+        text="P(class|text) ∝ P(class) × ∏ P(word|class)",
+        font=("Courier", 10)
+    )
+    formula.pack(pady=5)
+    
+    components = ttk.Frame(naive_bayes)
+    ttk.Label(components, text="• P(class) - Prior probability of each class (positive/negative/neutral)").pack(anchor="w")
+    ttk.Label(components, text="• P(word|class) - Probability of each word appearing in a given class").pack(anchor="w")
+    ttk.Label(components, text="• ∏ - Product of all word probabilities").pack(anchor="w")
+    components.pack(pady=5)
+    naive_bayes.pack(fill="x", padx=10, pady=5)
+
+    # N-gram Analysis section
+    ngram = ttk.LabelFrame(scrollable_frame, text="N-gram Analysis")
+    ttk.Label(
+        ngram,
+        text="N-gram analysis extends beyond individual words to consider sequences of N consecutive words:",
+        wraplength=500
+    ).pack(pady=5)
+    
+    ngram_types = ttk.Frame(ngram)
+    ttk.Label(ngram_types, text="• Unigrams (N=1): Individual words").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Bigrams (N=2): Pairs of consecutive words").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Trigrams (N=3): Sequences of three consecutive words").pack(anchor="w")
+    ngram_types.pack(pady=5)
+    ngram.pack(fill="x", padx=10, pady=5)
+
+    # Key Features section
+    features = ttk.LabelFrame(scrollable_frame, text="Key Features")
+    features_list = [
+        "• Dual analysis methods (Naive Bayes and N-grams)",
+        "• Laplace (add-one) smoothing for both approaches",
+        "• Log probabilities to prevent numerical underflow",
+        "• Confidence scores using probability normalization",
+        "• Interactive training data management",
+        "• CSV import/export capabilities",
+        "• Detailed probability calculations view"
+    ]
+    for feature in features_list:
+        ttk.Label(features, text=feature).pack(anchor="w")
+    features.pack(fill="x", padx=10, pady=5)
+
+    # Text Processing section
+    processing = ttk.LabelFrame(scrollable_frame, text="Text Processing")
+    process_steps = [
+        "1. Text is converted to lowercase",
+        "2. Punctuation is removed",
+        "3. Text is split into tokens (words or n-grams)",
+        "4. Empty tokens are filtered out"
+    ]
+    for step in process_steps:
+        ttk.Label(processing, text=step).pack(anchor="w")
+    processing.pack(fill="x", padx=10, pady=5)
+
+    # Training Process section
+    training = ttk.LabelFrame(scrollable_frame, text="Training Process")
+    train_steps = [
+        "1. Count occurrences of tokens in each class",
+        "2. Calculate prior probabilities for each class",
+        "3. Apply Laplace smoothing to token probabilities",
+        "4. Store model parameters for both analysis methods"
+    ]
+    for step in train_steps:
+        ttk.Label(training, text=step).pack(anchor="w")
+    training.pack(fill="x", padx=10, pady=5)
+
+    # Prediction Process section
+    prediction = ttk.LabelFrame(scrollable_frame, text="Prediction Process")
+    pred_steps = [
+        "1. Preprocess input text",
+        "2. Generate appropriate tokens (words or n-grams)",
+        "3. Calculate log probabilities for each class",
+        "4. Sum log probabilities of tokens and prior",
+        "5. Convert to normalized confidence scores",
+        "6. Select class with highest probability"
+    ]
+    for step in pred_steps:
+        ttk.Label(prediction, text=step).pack(anchor="w")
+    prediction.pack(fill="x", padx=10, pady=5)
+
+    # Pack the canvas and scrollbar
+    canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+    scrollbar.pack(side="right", fill="y")
+
+# Modify your existing code to add the About tab
+tab4 = ttk.Frame(tab_control)
+tab_control.add(tab4, text="About")
+create_about_tab(tab4)
+
 # Start the main event loop
 root.mainloop()
