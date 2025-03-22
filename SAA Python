@@ -10,6 +10,12 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import SVC
 from sklearn.pipeline import make_pipeline
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
+from matplotlib.figure import Figure
+import math
+import csv
 
 class SentimentAnalyzer:
     def __init__(self):
@@ -32,27 +38,29 @@ class SentimentAnalyzer:
         self.train()
 
     def load_training_data(self):
-        # Load training data from file
+        # Load training data in CSV format
         training_data = [
-            ("I absolutely love this product!", "positive"),
-            ("This is the best day ever!", "positive"),
-            ("Great service and amazing quality", "positive"),
-            ("The weather is okay today", "neutral"),
-            ("I'm not sure how I feel about this", "neutral"),
-            ("It could be better but it's not terrible", "neutral"),
-            ("This is terrible, I hate it", "negative"),
-            ("Worst experience ever, very disappointing", "negative"),
-            ("Poor quality and bad service", "negative"),
-            ("I love my phone", "positive"),
-            ("I hate my phone", "negative"),
-            ("My phone is okay", "neutral"),
-            ("I am very happy with my purchase", "positive"),
-            ("I am very unhappy with my purchase", "negative"),
-            ("The product is average", "neutral")
+            ["Sentence", "Sentiment"],  # Header row
+            ["I absolutely love this product!", "positive"],
+            ["This is the best day ever!", "positive"],
+            ["Great service and amazing quality", "positive"],
+            ["The weather is okay today", "neutral"],
+            ["I'm not sure how I feel about this", "neutral"],
+            ["It could be better but it's not terrible", "neutral"],
+            ["This is terrible, I hate it", "negative"],
+            ["Worst experience ever, very disappointing", "negative"],
+            ["Poor quality and bad service", "negative"],
+            ["I love my phone", "positive"],
+            ["I hate my phone", "negative"],
+            ["My phone is okay", "neutral"],
+            ["I am very happy with my purchase", "positive"],
+            ["I am very unhappy with my purchase", "negative"],
+            ["The product is average", "neutral"]
         ]
 
-        for text, sentiment in training_data:
-            self.sentiment_data[sentiment].append(text.lower())
+        # Skip header row and process data
+        for text, sentiment in training_data[1:]:
+            self.sentiment_data[sentiment.lower()].append(text.lower())
 
     def preprocess_text(self, text: str) -> str:
         # Clean and preprocess text
@@ -164,22 +172,39 @@ class SentimentAnalyzer:
         self.train()
 
     def export_training_data(self, filepath: str):
-        # Export training data to a file
-        with open(filepath, 'w') as file:
+        # Export training data to a CSV file
+        with open(filepath, 'w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Sentence", "Sentiment"])  # Write header
             for sentiment, texts in self.sentiment_data.items():
                 for text in texts:
-                    file.write(f"{text}\t{sentiment}\n")
+                    writer.writerow([text, sentiment])
 
     def import_training_data(self, filepath: str):
-        # Import training data from a file
+        # Import training data from a CSV file
         if not Path(filepath).exists():
             messagebox.showerror("Error", f"File not found: {filepath}")
             return
-        with open(filepath, 'r') as file:
-            for line in file:
-                text, sentiment = line.strip().split('\t')
-                self.sentiment_data[sentiment].append(text.lower())
-        self.train()
+        
+        # Clear existing training data
+        self.sentiment_data = {
+            'positive': [],
+            'neutral': [],
+            'negative': []
+        }
+        
+        try:
+            with open(filepath, 'r', newline='') as file:
+                reader = csv.DictReader(file)
+                for row in reader:
+                    sentiment = row['Sentiment'].lower()
+                    text = row['Sentence'].lower()
+                    if sentiment in self.sentiment_data:
+                        self.sentiment_data[sentiment].append(text)
+            self.train()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error reading CSV file: {str(e)}")
+            return
 
     def get_training_data(self) -> List[Tuple[str, str]]:
         # Get the training data as a list of tuples
@@ -195,6 +220,9 @@ def analyze_text():
     if not text:
         messagebox.showwarning("Input Error", "Please enter some text to analyze.")
         return
+
+    # Store text before clearing
+    current_text = text
 
     # Analyze sentiment
     scores = analyzer.analyze_sentiment(text)
@@ -225,8 +253,181 @@ def analyze_text():
     # Store the last analyzed text
     last_analyzed_text = text
 
+    # Update Numbers tab visualizations with the current text and scores
+    for child in tab_control.winfo_children():
+        if tab_control.tab(child)['text'] == 'Numbers':
+            update_numbers_tab(child, current_text, scores)
+
     # Clear the text box
     text_entry.delete("1.0", tk.END)
+
+    # Update visualizations in Numbers tab
+    for child in tab_control.winfo_children():
+        if tab_control.tab(child)['text'] == 'Numbers':
+            for notebook in child.winfo_children():
+                if isinstance(notebook, ttk.Notebook):
+                    for tab in notebook.winfo_children():
+                        for button in tab.winfo_children():
+                            if isinstance(button, ttk.Button):
+                                button.invoke()
+
+def update_numbers_tab(tab, text, scores):
+    # Find the notebook within the Numbers tab
+    numbers_notebook = None
+    for child in tab.winfo_children():
+        if isinstance(child, ttk.Notebook):
+            numbers_notebook = child
+            break
+    
+    if not numbers_notebook:
+        return
+
+    # Update each visualization based on the active tab
+    current_tab = numbers_notebook.select()
+    if current_tab:
+        tab_name = numbers_notebook.tab(current_tab)['text']
+        
+        if tab_name == "N-gram Details":
+            update_ngram_details(current_tab, text, scores)
+        elif tab_name == "Naive Bayes Details":
+            update_nb_details(current_tab, text, scores)
+        elif tab_name == "SVM Details":
+            update_svm_details(current_tab, text, scores)
+
+def update_ngram_details(tab, text, scores):
+    # Clear existing content
+    for widget in tab.winfo_children():
+        widget.destroy()
+
+    # Create figure
+    fig = Figure(figsize=(10, 6))
+    ax = fig.add_subplot(111)
+
+    # Plot N-gram scores
+    sentiments = list(scores['ngram'].keys())
+    values = [scores['ngram'][s] for s in sentiments]
+    x = np.arange(len(sentiments))
+    
+    bars = ax.bar(x, values)
+    ax.set_xticks(x)
+    ax.set_xticklabels(sentiments)
+    ax.set_title('N-gram Analysis Scores')
+    ax.set_ylabel('Probability (%)')
+
+    # Add value labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}%', ha='center', va='bottom')
+
+    canvas = FigureCanvasTkAgg(fig, master=tab)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    # Add detailed breakdown
+    details_frame = ttk.LabelFrame(tab, text="Detailed Breakdown")
+    details_frame.pack(fill=tk.X, padx=5, pady=5)
+    
+    bigrams = analyzer.get_ngrams(text, 2)
+    trigrams = analyzer.get_ngrams(text, 3)
+    
+    ttk.Label(details_frame, text="Bigrams found:").pack(anchor=tk.W)
+    for bigram in bigrams:
+        ttk.Label(details_frame, text=f"• {bigram}").pack(anchor=tk.W)
+    
+    ttk.Label(details_frame, text="\nTrigrams found:").pack(anchor=tk.W)
+    for trigram in trigrams:
+        ttk.Label(details_frame, text=f"• {trigram}").pack(anchor=tk.W)
+
+def update_nb_details(tab, text, scores):
+    # Clear existing content
+    for widget in tab.winfo_children():
+        widget.destroy()
+
+    # Create figure
+    fig = Figure(figsize=(10, 6))
+    ax = fig.add_subplot(111)
+
+    # Plot Naive Bayes scores
+    sentiments = list(scores['naive_bayes'].keys())
+    values = [scores['naive_bayes'][s] for s in sentiments]
+    x = np.arange(len(sentiments))
+    
+    bars = ax.bar(x, values)
+    ax.set_xticks(x)
+    ax.set_xticklabels(sentiments)
+    ax.set_title('Naive Bayes Probability Distribution')
+    ax.set_ylabel('Probability (%)')
+
+    # Add value labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}%', ha='center', va='bottom')
+
+    canvas = FigureCanvasTkAgg(fig, master=tab)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    # Add word probability breakdown
+    details_frame = ttk.LabelFrame(tab, text="Word Probabilities")
+    details_frame.pack(fill=tk.X, padx=5, pady=5)
+    
+    # Get word probabilities from the vectorizer
+    words = analyzer.vectorizer.get_feature_names_out()
+    for word in words:
+        if word in text.lower():
+            ttk.Label(details_frame, 
+                     text=f"'{word}' probabilities:").pack(anchor=tk.W)
+            for sentiment in sentiments:
+                prob = analyzer.nb_model.feature_log_prob_[
+                    list(analyzer.nb_model.classes_).index(sentiment)
+                ][list(words).index(word)]
+                ttk.Label(details_frame, 
+                         text=f"  {sentiment}: {np.exp(prob):.4f}").pack(anchor=tk.W)
+
+def update_svm_details(tab, text, scores):
+    # Clear existing content
+    for widget in tab.winfo_children():
+        widget.destroy()
+
+    # Create figure
+    fig = Figure(figsize=(10, 6))
+    ax = fig.add_subplot(111)
+
+    # Plot SVM scores
+    sentiments = list(scores['svm'].keys())
+    values = [scores['svm'][s] for s in sentiments]
+    x = np.arange(len(sentiments))
+    
+    bars = ax.bar(x, values)
+    ax.set_xticks(x)
+    ax.set_xticklabels(sentiments)
+    ax.set_title('SVM Classification Probabilities')
+    ax.set_ylabel('Probability (%)')
+
+    # Add value labels on bars
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.1f}%', ha='center', va='bottom')
+
+    canvas = FigureCanvasTkAgg(fig, master=tab)
+    canvas.draw()
+    canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+    # Add SVM details
+    details_frame = ttk.LabelFrame(tab, text="SVM Analysis Details")
+    details_frame.pack(fill=tk.X, padx=5, pady=5)
+    
+    # Get decision function values
+    X = analyzer.svm_model.named_steps['tfidfvectorizer'].transform([text])
+    decision_values = analyzer.svm_model.named_steps['svc'].decision_function(X)
+    
+    ttk.Label(details_frame, text="Decision Function Values:").pack(anchor=tk.W)
+    for i, sentiment in enumerate(sentiments):
+        ttk.Label(details_frame, 
+                 text=f"• {sentiment}: {decision_values[0][i]:.4f}").pack(anchor=tk.W)
 
 def add_to_training():
     global last_analyzed_text
@@ -244,13 +445,18 @@ def add_to_training():
     update_training_data_view()
 
 def export_training_data():
-    filepath = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+    filepath = filedialog.asksaveasfilename(
+        defaultextension=".csv",
+        filetypes=[("CSV files", "*.csv")]
+    )
     if filepath:
         analyzer.export_training_data(filepath)
         messagebox.showinfo("Success", "Training data exported successfully.")
 
 def import_training_data():
-    filepath = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+    filepath = filedialog.askopenfilename(
+        filetypes=[("CSV files", "*.csv")]
+    )
     if filepath:
         analyzer.import_training_data(filepath)
         messagebox.showinfo("Success", "Training data imported successfully.")
@@ -646,6 +852,178 @@ def create_about_tab(tab):
 tab4 = ttk.Frame(tab_control)
 tab_control.add(tab4, text="About")
 create_about_tab(tab4)
+
+def create_numbers_tab(tab):
+    # Create a notebook for sub-tabs within Numbers tab
+    numbers_notebook = ttk.Notebook(tab)
+    
+    # Create sub-tabs for each model
+    ngram_tab = ttk.Frame(numbers_notebook)
+    nb_tab = ttk.Frame(numbers_notebook)
+    svm_tab = ttk.Frame(numbers_notebook)
+    
+    numbers_notebook.add(ngram_tab, text="N-gram Details")
+    numbers_notebook.add(nb_tab, text="Naive Bayes Details")
+    numbers_notebook.add(svm_tab, text="SVM Details")
+    numbers_notebook.pack(expand=1, fill="both")
+
+    # N-gram Analysis Tab
+    def update_ngram_viz():
+        text = text_entry.get("1.0", tk.END).strip()
+        if not text:
+            return
+
+        # Clear previous plots
+        for widget in ngram_frame.winfo_children():
+            widget.destroy()
+
+        # Create figure for N-gram visualization
+        fig = Figure(figsize=(10, 6))
+        ax = fig.add_subplot(111)
+
+        # Get N-gram counts
+        bigrams = analyzer.get_ngrams(text, 2)
+        trigrams = analyzer.get_ngrams(text, 3)
+
+        # Calculate probabilities
+        sentiments = ['positive', 'neutral', 'negative']
+        bigram_probs = {s: [] for s in sentiments}
+        trigram_probs = {s: [] for s in sentiments}
+
+        for b in bigrams:
+            for s in sentiments:
+                prob = analyzer.ngram_counts['bigram'][s].get(b, 0)
+                bigram_probs[s].append(prob)
+
+        for t in trigrams:
+            for s in sentiments:
+                prob = analyzer.ngram_counts['trigram'][s].get(t, 0)
+                trigram_probs[s].append(prob)
+
+        # Plot
+        x = np.arange(len(bigrams))
+        width = 0.25
+
+        for i, s in enumerate(sentiments):
+            ax.bar(x + i*width, bigram_probs[s], width, label=f'{s} (bigrams)')
+
+        ax.set_xticks(x + width)
+        ax.set_xticklabels(bigrams, rotation=45, ha='right')
+        ax.legend()
+        ax.set_title('N-gram Probability Distribution')
+
+        canvas = FigureCanvasTkAgg(fig, master=ngram_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+        # Add formula explanation
+        formula_text = (
+            "N-gram Model Formula:\n"
+            "P(sentiment|text) = Σ(w_b * P(bigram|sentiment) + w_t * P(trigram|sentiment))\n"
+            "where w_b=0.75 and w_t=0.25 are bigram and trigram weights"
+        )
+        tk.Label(ngram_frame, text=formula_text, justify=tk.LEFT).pack(pady=10)
+
+    # Naive Bayes Tab
+    def update_nb_viz():
+        text = text_entry.get("1.0", tk.END).strip()
+        if not text:
+            return
+
+        # Clear previous plots
+        for widget in nb_frame.winfo_children():
+            widget.destroy()
+
+        # Create figure for NB visualization
+        fig = Figure(figsize=(10, 6))
+        ax = fig.add_subplot(111)
+
+        # Get word probabilities
+        X = analyzer.vectorizer.transform([text])
+        feature_names = analyzer.vectorizer.get_feature_names_out()
+        word_probs = analyzer.nb_model.feature_log_prob_
+
+        # Plot word probabilities
+        x = np.arange(len(feature_names))
+        width = 0.25
+
+        for i, sentiment in enumerate(['positive', 'neutral', 'negative']):
+            ax.bar(x + i*width, np.exp(word_probs[i]), width, label=sentiment)
+
+        ax.set_xticks(x + width)
+        ax.set_xticklabels(feature_names, rotation=45, ha='right')
+        ax.legend()
+        ax.set_title('Word Probability Distribution (Naive Bayes)')
+
+        canvas = FigureCanvasTkAgg(fig, master=nb_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+        # Add formula explanation
+        formula_text = (
+            "Naive Bayes Formula:\n"
+            "P(sentiment|text) = P(sentiment) * Π P(word|sentiment)\n"
+            "Log space: log(P(sentiment|text)) = log(P(sentiment)) + Σ log(P(word|sentiment))"
+        )
+        tk.Label(nb_frame, text=formula_text, justify=tk.LEFT).pack(pady=10)
+
+    # SVM Tab
+    def update_svm_viz():
+        text = text_entry.get("1.0", tk.END).strip()
+        if not text:
+            return
+
+        # Clear previous plots
+        for widget in svm_frame.winfo_children():
+            widget.destroy()
+
+        # Create figure for SVM visualization
+        fig = Figure(figsize=(10, 6))
+        ax = fig.add_subplot(111)
+
+        # Get SVM decision function values
+        X = analyzer.svm_model.named_steps['tfidfvectorizer'].transform([text])
+        decision_values = analyzer.svm_model.named_steps['svc'].decision_function(X)
+
+        # Plot decision boundaries
+        sentiments = ['positive', 'neutral', 'negative']
+        x = np.arange(len(sentiments))
+        
+        ax.bar(x, decision_values[0], width=0.5)
+        ax.set_xticks(x)
+        ax.set_xticklabels(sentiments)
+        ax.set_title('SVM Decision Function Values')
+
+        canvas = FigureCanvasTkAgg(fig, master=svm_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+        # Add formula explanation
+        formula_text = (
+            "SVM Formula:\n"
+            "f(x) = Σ(α_i * K(x_i, x) + b)\n"
+            "where K is the kernel function and α_i are the support vector coefficients"
+        )
+        tk.Label(svm_frame, text=formula_text, justify=tk.LEFT).pack(pady=10)
+
+    # Create frames for each analysis type
+    ngram_frame = ttk.Frame(ngram_tab)
+    nb_frame = ttk.Frame(nb_tab)
+    svm_frame = ttk.Frame(svm_tab)
+
+    ngram_frame.pack(fill=tk.BOTH, expand=1)
+    nb_frame.pack(fill=tk.BOTH, expand=1)
+    svm_frame.pack(fill=tk.BOTH, expand=1)
+
+    # Add update buttons
+    ttk.Button(ngram_frame, text="Update N-gram Analysis", command=update_ngram_viz).pack(pady=5)
+    ttk.Button(nb_frame, text="Update Naive Bayes Analysis", command=update_nb_viz).pack(pady=5)
+    ttk.Button(svm_frame, text="Update SVM Analysis", command=update_svm_viz).pack(pady=5)
+
+# Add the Numbers tab to the main notebook
+tab5 = ttk.Frame(tab_control)
+tab_control.add(tab5, text="Numbers")
+create_numbers_tab(tab5)
 
 # Start the main event loop
 root.mainloop()
