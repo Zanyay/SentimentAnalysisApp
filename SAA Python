@@ -6,6 +6,10 @@ from tkinter import messagebox, filedialog
 from tkinter import ttk
 import speech_recognition as sr
 from pathlib import Path
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.svm import SVC
+from sklearn.pipeline import make_pipeline
 
 class SentimentAnalyzer:
     def __init__(self):
@@ -18,6 +22,12 @@ class SentimentAnalyzer:
             'bigram': defaultdict(lambda: defaultdict(int)),
             'trigram': defaultdict(lambda: defaultdict(int))
         }
+
+        # Initialize Naive Bayes and SVM models
+        self.vectorizer = TfidfVectorizer()
+        self.nb_model = MultinomialNB()
+        self.svm_model = make_pipeline(TfidfVectorizer(), SVC(probability=True))
+
         self.load_training_data()
         self.train()
 
@@ -60,7 +70,7 @@ class SentimentAnalyzer:
         return ngrams
 
     def train(self):
-        # Train the model using bigrams and trigrams
+        # Train the N-gram model
         for sentiment, texts in self.sentiment_data.items():
             for text in texts:
                 # Process bigrams
@@ -73,48 +83,78 @@ class SentimentAnalyzer:
                 for trigram in trigrams:
                     self.ngram_counts['trigram'][sentiment][trigram] += 1
 
+        # Train Naive Bayes and SVM models
+        all_texts = []
+        all_labels = []
+        for sentiment, texts in self.sentiment_data.items():
+            all_texts.extend(texts)
+            all_labels.extend([sentiment] * len(texts))
+        self.nb_model.fit(self.vectorizer.fit_transform(all_texts), all_labels)
+        self.svm_model.fit(all_texts, all_labels)
+
     def analyze_sentiment(self, text: str) -> Dict[str, float]:
-        # Analyze sentiment of input text
+        # Analyze sentiment using N-gram method
         bigrams = self.get_ngrams(text, 2)
         trigrams = self.get_ngrams(text, 3)
         
-        scores = {
+        scores_ngram = {
             'positive': 0.0,
             'neutral': 0.0,
             'negative': 0.0
         }
 
-        # Weight for combining bigram and trigram scores
         bigram_weight = 0.75
         trigram_weight = 0.25
 
-        # Calculate bigram scores
         for bigram in bigrams:
-            for sentiment in scores.keys():
+            for sentiment in scores_ngram.keys():
                 if bigram in self.ngram_counts['bigram'][sentiment]:
-                    scores[sentiment] += self.ngram_counts['bigram'][sentiment][bigram] * bigram_weight
+                    scores_ngram[sentiment] += self.ngram_counts['bigram'][sentiment][bigram] * bigram_weight
 
-        # Calculate trigram scores
         for trigram in trigrams:
-            for sentiment in scores.keys():
+            for sentiment in scores_ngram.keys():
                 if trigram in self.ngram_counts['trigram'][sentiment]:
-                    scores[sentiment] += self.ngram_counts['trigram'][sentiment][trigram] * trigram_weight
+                    scores_ngram[sentiment] += self.ngram_counts['trigram'][sentiment][trigram] * trigram_weight
 
-        # Fallback mechanism if no n-grams match
-        if sum(scores.values()) == 0:
-            scores['neutral'] = 1.0
+        if sum(scores_ngram.values()) == 0:
+            scores_ngram['neutral'] = 1.0
 
-        # Normalize scores
-        total_score = sum(scores.values()) or 1
-        normalized_scores = {
-            sentiment: (score / total_score) * 100 
-            for sentiment, score in scores.items()
+        total_score_ngram = sum(scores_ngram.values()) or 1
+        normalized_scores_ngram = {
+            sentiment: (score / total_score_ngram) * 100 
+            for sentiment, score in scores_ngram.items()
         }
 
-        return normalized_scores
+        # Analyze sentiment using Naive Bayes method
+        nb_probs = self.nb_model.predict_proba(self.vectorizer.transform([text]))[0]
+        scores_nb = {
+            'positive': nb_probs[self.nb_model.classes_.tolist().index('positive')] * 100,
+            'neutral': nb_probs[self.nb_model.classes_.tolist().index('neutral')] * 100,
+            'negative': nb_probs[self.nb_model.classes_.tolist().index('negative')] * 100
+        }
+
+        # Analyze sentiment using SVM method
+        svm_probs = self.svm_model.predict_proba([text])[0]
+        scores_svm = {
+            'positive': svm_probs[self.svm_model.classes_.tolist().index('positive')] * 100,
+            'neutral': svm_probs[self.svm_model.classes_.tolist().index('neutral')] * 100,
+            'negative': svm_probs[self.svm_model.classes_.tolist().index('negative')] * 100
+        }
+
+        # Average the results for final consensus
+        final_scores = {
+            sentiment: (normalized_scores_ngram[sentiment] + scores_nb[sentiment] + scores_svm[sentiment]) / 3
+            for sentiment in scores_ngram.keys()
+        }
+
+        return {
+            'ngram': normalized_scores_ngram,
+            'naive_bayes': scores_nb,
+            'svm': scores_svm,
+            'final': final_scores
+        }
 
     def get_final_sentiment(self, scores: Dict[str, float]) -> Tuple[str, float]:
-        # Determine final sentiment based on highest score
         final_sentiment = max(scores.items(), key=lambda x: x[1])
         return final_sentiment
 
@@ -132,6 +172,9 @@ class SentimentAnalyzer:
 
     def import_training_data(self, filepath: str):
         # Import training data from a file
+        if not Path(filepath).exists():
+            messagebox.showerror("Error", f"File not found: {filepath}")
+            return
         with open(filepath, 'r') as file:
             for line in file:
                 text, sentiment = line.strip().split('\t')
@@ -155,14 +198,29 @@ def analyze_text():
 
     # Analyze sentiment
     scores = analyzer.analyze_sentiment(text)
-    final_sentiment, confidence = analyzer.get_final_sentiment(scores)
+    final_sentiment, confidence = analyzer.get_final_sentiment(scores['final'])
 
-    # Display results
-    result_text = f"Sentiment Analysis Results:\n{'-' * 25}\nText: {text}\n\nDetailed Scores:\n"
-    for sentiment, score in scores.items():
-        result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
-    result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
-    result_label.config(text=result_text)
+    # Display results in respective frames
+    ngram_result_text = "N-gram Analysis:\n"
+    for sentiment, score in scores['ngram'].items():
+        ngram_result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+    ngram_result_label.config(text=ngram_result_text)
+
+    nb_result_text = "Naive Bayes Analysis:\n"
+    for sentiment, score in scores['naive_bayes'].items():
+        nb_result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+    nb_result_label.config(text=nb_result_text)
+
+    svm_result_text = "SVM Analysis:\n"
+    for sentiment, score in scores['svm'].items():
+        svm_result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+    svm_result_label.config(text=svm_result_text)
+
+    final_result_text = f"Final Consensus:\n"
+    for sentiment, score in scores['final'].items():
+        final_result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+    final_result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
+    final_result_label.config(text=final_result_text)
 
     # Store the last analyzed text
     last_analyzed_text = text
@@ -231,6 +289,39 @@ text_entry.pack(pady=10)
 analyze_button = tk.Button(tab1, text="Analyze Sentiment", command=analyze_text)
 analyze_button.pack(pady=10)
 
+# Create a frame for the results
+results_frame = tk.Frame(tab1)
+results_frame.pack(pady=10)
+
+# N-gram Analysis
+ngram_frame = tk.Frame(results_frame, borderwidth=1, relief="solid")
+ngram_frame.pack(side=tk.LEFT, padx=5, pady=5)
+tk.Label(ngram_frame, text="N-gram Analysis").pack()
+ngram_result_label = tk.Label(ngram_frame, text="", justify=tk.LEFT)
+ngram_result_label.pack()
+
+# Naive Bayes Analysis
+nb_frame = tk.Frame(results_frame, borderwidth=1, relief="solid")
+nb_frame.pack(side=tk.LEFT, padx=5, pady=5)
+tk.Label(nb_frame, text="Naive Bayes Analysis").pack()
+nb_result_label = tk.Label(nb_frame, text="", justify=tk.LEFT)
+nb_result_label.pack()
+
+# SVM Analysis
+svm_frame = tk.Frame(results_frame, borderwidth=1, relief="solid")
+svm_frame.pack(side=tk.LEFT, padx=5, pady=5)
+tk.Label(svm_frame, text="SVM Analysis").pack()
+svm_result_label = tk.Label(svm_frame, text="", justify=tk.LEFT)
+svm_result_label.pack()
+
+# Final Consensus
+final_frame = tk.Frame(tab1, borderwidth=1, relief="solid")
+final_frame.pack(pady=10)
+tk.Label(final_frame, text="Final Consensus").pack()
+final_result_label = tk.Label(final_frame, text="", justify=tk.LEFT)
+final_result_label.pack()
+
+# Define result_label to avoid the error
 result_label = tk.Label(tab1, text="", justify=tk.LEFT)
 result_label.pack(pady=10)
 
@@ -324,11 +415,21 @@ def process_audio_file():
             if text.strip():
                 # Analyze sentiment
                 scores = analyzer.analyze_sentiment(text)
-                final_sentiment, confidence = analyzer.get_final_sentiment(scores)
+                final_sentiment, confidence = analyzer.get_final_sentiment(scores['final'])
                 
                 # Display results
                 result_text = f"Sentiment Analysis Results:\n{'-' * 25}\n\nDetailed Scores:\n"
-                for sentiment, score in scores.items():
+                result_text += "N-gram Analysis:\n"
+                for sentiment, score in scores['ngram'].items():
+                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                result_text += "\nNaive Bayes Analysis:\n"
+                for sentiment, score in scores['naive_bayes'].items():
+                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                result_text += "\nSVM Analysis:\n"
+                for sentiment, score in scores['svm'].items():
+                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                result_text += f"\nFinal Consensus:\n"
+                for sentiment, score in scores['final'].items():
                     result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
                 result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
                 
