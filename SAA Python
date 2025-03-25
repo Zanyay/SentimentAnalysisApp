@@ -16,6 +16,8 @@ import numpy as np
 from matplotlib.figure import Figure
 import math
 import csv
+import queue  # Add new import
+import threading  # Add new import
 
 class SentimentAnalyzer:
     def __init__(self):
@@ -181,28 +183,77 @@ class SentimentAnalyzer:
                     writer.writerow([text, sentiment])
 
     def import_training_data(self, filepath: str):
-        # Import training data from a CSV file
         if not Path(filepath).exists():
             messagebox.showerror("Error", f"File not found: {filepath}")
             return
         
-        # Clear existing training data
-        self.sentiment_data = {
-            'positive': [],
-            'neutral': [],
-            'negative': []
-        }
+        # Create progress window
+        progress_window = tk.Toplevel()
+        progress_window.title("Importing Data")
+        progress_window.geometry("300x150")
+        
+        progress_label = ttk.Label(progress_window, text="Reading CSV file...")
+        progress_label.pack(pady=10)
+        
+        progress_bar = ttk.Progressbar(progress_window, length=200, mode='determinate')
+        progress_bar.pack(pady=10)
         
         try:
-            with open(filepath, 'r', newline='') as file:
+            # First count total lines for progress tracking
+            total_lines = sum(1 for _ in open(filepath, 'r', encoding='utf-8')) - 1  # Subtract header
+            progress_bar['maximum'] = total_lines
+            
+            # Clear existing training data
+            self.sentiment_data = {
+                'positive': [],
+                'neutral': [],
+                'negative': []
+            }
+            
+            # Process in batches
+            BATCH_SIZE = 1000
+            current_batch = []
+            processed_lines = 0
+            
+            with open(filepath, 'r', encoding='utf-8') as file:
                 reader = csv.DictReader(file)
+                
                 for row in reader:
                     sentiment = row['Sentiment'].lower()
                     text = row['Sentence'].lower()
+                    
                     if sentiment in self.sentiment_data:
-                        self.sentiment_data[sentiment].append(text)
-            self.train()
+                        current_batch.append((text, sentiment))
+                        
+                        if len(current_batch) >= BATCH_SIZE:
+                            # Process batch
+                            for text, sent in current_batch:
+                                self.sentiment_data[sent].append(text)
+                            current_batch = []
+                            
+                            # Update progress
+                            processed_lines += BATCH_SIZE
+                            progress_bar['value'] = processed_lines
+                            progress_label.config(text=f"Processed {processed_lines:,} of {total_lines:,} entries")
+                            progress_window.update()
+                
+                # Process remaining items
+                for text, sent in current_batch:
+                    self.sentiment_data[sent].append(text)
+            
+            progress_label.config(text="Training model...")
+            progress_window.update()
+            
+            # Train in a separate thread to prevent UI freeze
+            def train_thread():
+                self.train()
+                progress_window.destroy()
+                messagebox.showinfo("Success", "Training data imported and model trained successfully")
+            
+            threading.Thread(target=train_thread).start()
+            
         except Exception as e:
+            progress_window.destroy()
             messagebox.showerror("Error", f"Error reading CSV file: {str(e)}")
             return
 
@@ -215,14 +266,11 @@ class SentimentAnalyzer:
         return training_data
 
 def analyze_text():
-    global last_analyzed_text
+    global last_analyzed_text, last_analyzed_scores
     text = text_entry.get("1.0", tk.END).strip()
     if not text:
         messagebox.showwarning("Input Error", "Please enter some text to analyze.")
         return
-
-    # Store text before clearing
-    current_text = text
 
     # Analyze sentiment
     scores = analyzer.analyze_sentiment(text)
@@ -250,26 +298,22 @@ def analyze_text():
     final_result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
     final_result_label.config(text=final_result_text)
 
-    # Store the last analyzed text
+    # Store the last analyzed text and scores
     last_analyzed_text = text
+    last_analyzed_scores = scores
 
-    # Update Numbers tab visualizations with the current text and scores
+    # Update Numbers tab visualizations
+    numbers_tab = None
     for child in tab_control.winfo_children():
         if tab_control.tab(child)['text'] == 'Numbers':
-            update_numbers_tab(child, current_text, scores)
+            numbers_tab = child
+            break
+
+    if numbers_tab and hasattr(numbers_tab, 'update_viz'):
+        numbers_tab.update_viz()
 
     # Clear the text box
     text_entry.delete("1.0", tk.END)
-
-    # Update visualizations in Numbers tab
-    for child in tab_control.winfo_children():
-        if tab_control.tab(child)['text'] == 'Numbers':
-            for notebook in child.winfo_children():
-                if isinstance(notebook, ttk.Notebook):
-                    for tab in notebook.winfo_children():
-                        for button in tab.winfo_children():
-                            if isinstance(button, ttk.Button):
-                                button.invoke()
 
 def update_numbers_tab(tab, text, scores):
     # Find the notebook within the Numbers tab
@@ -282,10 +326,12 @@ def update_numbers_tab(tab, text, scores):
     if not numbers_notebook:
         return
 
-    # Update each visualization based on the active tab
-    current_tab = numbers_notebook.select()
-    if current_tab:
-        tab_name = numbers_notebook.tab(current_tab)['text']
+    # Get the selected tab widget instead of just the tab name
+    current_tab_id = numbers_notebook.select()
+    if current_tab_id:  # Make sure a tab is actually selected
+        # Get the actual widget for the selected tab
+        current_tab = numbers_notebook.nametowidget(current_tab_id)
+        tab_name = numbers_notebook.tab(current_tab_id)['text']
         
         if tab_name == "N-gram Details":
             update_ngram_details(current_tab, text, scores)
@@ -473,6 +519,7 @@ def update_training_data_view():
 # Initialize analyzer
 analyzer = SentimentAnalyzer()
 last_analyzed_text = ""
+last_analyzed_scores = None  # Store the last analysis scores
 
 # Create the main window
 root = tk.Tk()
@@ -480,23 +527,29 @@ root.title("Sentiment Analyzer")
 
 # Create a tabbed interface
 tab_control = ttk.Notebook(root)
-tab1 = ttk.Frame(tab_control)
-tab2 = ttk.Frame(tab_control)
-tab3 = ttk.Frame(tab_control)
-tab_control.add(tab3, text="Audio Analysis")      # Changed order - Audio first
-tab_control.add(tab1, text="Text Analysis")  # Text analysis second
-tab_control.add(tab2, text="Training Data")       # Training data last
+audio_tab = ttk.Frame(tab_control)      # Tab 1: Audio Analysis
+text_tab = ttk.Frame(tab_control)       # Tab 2: Text Analysis
+numbers_tab = ttk.Frame(tab_control)    # Tab 3: Numbers
+training_tab = ttk.Frame(tab_control)   # Tab 4: Training Data
+about_tab = ttk.Frame(tab_control)      # Tab 5: About
+
+# Add tabs in the correct order
+tab_control.add(audio_tab, text="Audio Analysis")
+tab_control.add(text_tab, text="Text Analysis")
+tab_control.add(numbers_tab, text="Numbers")
+tab_control.add(training_tab, text="Training Data")
+tab_control.add(about_tab, text="About")
 tab_control.pack(expand=1, fill="both")
 
 # Tab 1: Sentiment Analysis
-tk.Label(tab1, text="Enter text to analyze:").pack(pady=10)
-text_entry = tk.Text(tab1, height=10, width=50)
+tk.Label(text_tab, text="Enter text to analyze:").pack(pady=10)
+text_entry = tk.Text(text_tab, height=10, width=50)
 text_entry.pack(pady=10)
-analyze_button = tk.Button(tab1, text="Analyze Sentiment", command=analyze_text)
+analyze_button = tk.Button(text_tab, text="Analyze Sentiment", command=analyze_text)
 analyze_button.pack(pady=10)
 
 # Create a frame for the results
-results_frame = tk.Frame(tab1)
+results_frame = tk.Frame(text_tab)
 results_frame.pack(pady=10)
 
 # N-gram Analysis
@@ -521,18 +574,18 @@ svm_result_label = tk.Label(svm_frame, text="", justify=tk.LEFT)
 svm_result_label.pack()
 
 # Final Consensus
-final_frame = tk.Frame(tab1, borderwidth=1, relief="solid")
+final_frame = tk.Frame(text_tab, borderwidth=1, relief="solid")
 final_frame.pack(pady=10)
 tk.Label(final_frame, text="Final Consensus").pack()
 final_result_label = tk.Label(final_frame, text="", justify=tk.LEFT)
 final_result_label.pack()
 
 # Define result_label to avoid the error
-result_label = tk.Label(tab1, text="", justify=tk.LEFT)
+result_label = tk.Label(text_tab, text="", justify=tk.LEFT)
 result_label.pack(pady=10)
 
 # Create a frame for the buttons and sentiment selection
-top_frame = tk.Frame(tab1)
+top_frame = tk.Frame(text_tab)
 top_frame.pack(pady=10)
 
 # Add text above the sentiment selection
@@ -548,7 +601,7 @@ add_button = tk.Button(top_frame, text="Add results", command=add_to_training)
 add_button.pack(side=tk.TOP, pady=5)
 
 # Create a frame for the import and export buttons at the bottom
-bottom_frame = tk.Frame(tab1)
+bottom_frame = tk.Frame(text_tab)
 bottom_frame.pack(side=tk.BOTTOM, pady=10)
 
 import_export_frame = tk.Frame(bottom_frame)
@@ -561,13 +614,14 @@ import_button = tk.Button(import_export_frame, text="Import Training Data", comm
 import_button.pack(side=tk.LEFT, padx=5)
 
 # Tab 2: Training Data
-training_data_textbox = tk.Text(tab2, height=20, width=80, state=tk.DISABLED)
+training_data_textbox = tk.Text(training_tab, height=40, width=80, state=tk.DISABLED)
 training_data_textbox.pack(pady=10)
 
 # Update the training data view initially
 update_training_data_view()
 
 def process_audio_file():
+    global last_analyzed_text, last_analyzed_scores
     file_path = filedialog.askopenfilename(
         filetypes=[("Audio Files", "*.wav *.mp3 *.ogg *.m4a")]  # Allow more audio formats
     )
@@ -623,23 +677,53 @@ def process_audio_file():
                 scores = analyzer.analyze_sentiment(text)
                 final_sentiment, confidence = analyzer.get_final_sentiment(scores['final'])
                 
-                # Display results
-                result_text = f"Sentiment Analysis Results:\n{'-' * 25}\n\nDetailed Scores:\n"
-                result_text += "N-gram Analysis:\n"
+                # Store text for Numbers tab update
+                current_text = text
+
+                # Display N-gram results
+                ngram_text = "N-gram Analysis:\n"
                 for sentiment, score in scores['ngram'].items():
-                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
-                result_text += "\nNaive Bayes Analysis:\n"
+                    ngram_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                audio_ngram_result_label.config(text=ngram_text)
+
+                # Display Naive Bayes results
+                nb_text = "Naive Bayes Analysis:\n"
                 for sentiment, score in scores['naive_bayes'].items():
-                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
-                result_text += "\nSVM Analysis:\n"
+                    nb_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                audio_nb_result_label.config(text=nb_text)
+
+                # Display SVM results
+                svm_text = "SVM Analysis:\n"
                 for sentiment, score in scores['svm'].items():
-                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
-                result_text += f"\nFinal Consensus:\n"
+                    svm_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                audio_svm_result_label.config(text=svm_text)
+
+                # Display Final Consensus
+                final_text = f"Final Consensus:\n"
                 for sentiment, score in scores['final'].items():
-                    result_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
-                result_text += f"\nFinal Sentiment: {final_sentiment.capitalize()} (Confidence: {confidence:.2f}%)"
+                    final_text += f"{sentiment.capitalize()}: {score:.2f}%\n"
+                final_text += f"\nFinal Sentiment: {final_sentiment.capitalize()}\n(Confidence: {confidence:.2f}%)"
+                audio_final_result_label.config(text=final_text)
                 
-                audio_result_label.config(text=result_text)
+                # Store the last analyzed text and scores
+                last_analyzed_text = text
+                last_analyzed_scores = scores
+                
+                # Update Numbers tab visualizations with the current text and scores
+                for child in tab_control.winfo_children():
+                    if tab_control.tab(child)['text'] == 'Numbers':
+                        update_numbers_tab(child, current_text, scores)
+
+                # Update visualizations in Numbers tab
+                for child in tab_control.winfo_children():
+                    if tab_control.tab(child)['text'] == 'Numbers':
+                        for notebook in child.winfo_children():
+                            if isinstance(notebook, ttk.Notebook):
+                                for tab in notebook.winfo_children():
+                                    for button in tab.winfo_children():
+                                        if isinstance(button, ttk.Button):
+                                            button.invoke()
+
                 audio_status_label.config(text="Analysis complete!")
             else:
                 audio_status_label.config(text="No speech detected in audio")
@@ -657,22 +741,51 @@ def process_audio_file():
         print(f"Detailed error: {str(e)}")  # For debugging
 
 # Tab 3: Audio Analysis
-tk.Label(tab3, text="Select an audio file for analysis:").pack(pady=10)
-audio_button = tk.Button(tab3, text="Choose Audio File", command=process_audio_file)
+tk.Label(audio_tab, text="Select an audio file for analysis:").pack(pady=10)
+audio_button = tk.Button(audio_tab, text="Choose Audio File", command=process_audio_file)
 audio_button.pack(pady=10)
 
-audio_status_label = tk.Label(tab3, text="No file selected")
+audio_status_label = tk.Label(audio_tab, text="No file selected")
 audio_status_label.pack(pady=5)
 
-tk.Label(tab3, text="Transcribed Text:").pack(pady=5)
-audio_text_display = tk.Text(tab3, height=8, width=50, state=tk.DISABLED)
+tk.Label(audio_tab, text="Transcribed Text:").pack(pady=5)
+audio_text_display = tk.Text(audio_tab, height=8, width=50, state=tk.DISABLED)
 audio_text_display.pack(pady=10)
 
-audio_result_label = tk.Label(tab3, text="", justify=tk.LEFT)
-audio_result_label.pack(pady=10)
+# Create a frame for the audio analysis results
+audio_results_frame = tk.Frame(audio_tab)
+audio_results_frame.pack(pady=10)
+
+# N-gram Analysis
+audio_ngram_frame = tk.Frame(audio_results_frame, borderwidth=1, relief="solid")
+audio_ngram_frame.pack(side=tk.LEFT, padx=5, pady=5)
+tk.Label(audio_ngram_frame, text="N-gram Analysis").pack()
+audio_ngram_result_label = tk.Label(audio_ngram_frame, text="", justify=tk.LEFT)
+audio_ngram_result_label.pack()
+
+# Naive Bayes Analysis
+audio_nb_frame = tk.Frame(audio_results_frame, borderwidth=1, relief="solid")
+audio_nb_frame.pack(side=tk.LEFT, padx=5, pady=5)
+tk.Label(audio_nb_frame, text="Naive Bayes Analysis").pack()
+audio_nb_result_label = tk.Label(audio_nb_frame, text="", justify=tk.LEFT)
+audio_nb_result_label.pack()
+
+# SVM Analysis
+audio_svm_frame = tk.Frame(audio_results_frame, borderwidth=1, relief="solid")
+audio_svm_frame.pack(side=tk.LEFT, padx=5, pady=5)
+tk.Label(audio_svm_frame, text="SVM Analysis").pack()
+audio_svm_result_label = tk.Label(audio_svm_frame, text="", justify=tk.LEFT)
+audio_svm_result_label.pack()
+
+# Final Consensus
+audio_final_frame = tk.Frame(audio_tab, borderwidth=1, relief="solid")
+audio_final_frame.pack(pady=10)
+tk.Label(audio_final_frame, text="Final Consensus").pack()
+audio_final_result_label = tk.Label(audio_final_frame, text="", justify=tk.LEFT)
+audio_final_result_label.pack()
 
 # Add training controls to Audio tab
-audio_top_frame = tk.Frame(tab3)
+audio_top_frame = tk.Frame(audio_tab)
 audio_top_frame.pack(pady=10)
 
 # Add text above the sentiment selection
@@ -688,7 +801,7 @@ audio_add_button = tk.Button(audio_top_frame, text="Add results", command=lambda
 audio_add_button.pack(side=tk.TOP, pady=5)
 
 # Create a frame for the import and export buttons at the bottom
-audio_bottom_frame = tk.Frame(tab3)
+audio_bottom_frame = tk.Frame(audio_tab)
 audio_bottom_frame.pack(side=tk.BOTTOM, pady=10)
 
 audio_import_export_frame = tk.Frame(audio_bottom_frame)
@@ -743,53 +856,153 @@ def create_about_tab(tab):
     ttk.Label(
         what_is,
         text="Sentiment analysis is the process of determining the emotional tone behind "
-             "a piece of text. This tool provides two different approaches to sentiment analysis:",
+             "a piece of text. This tool combines three different approaches to sentiment analysis:",
         wraplength=500
     ).pack(pady=5)
     
     approaches = ttk.Frame(what_is)
-    ttk.Label(approaches, text="• Naive Bayes Classification (word-based)").pack(anchor="w")
     ttk.Label(approaches, text="• N-gram Analysis (phrase-based)").pack(anchor="w")
+    ttk.Label(approaches, text="• Naive Bayes Classification (word-based)").pack(anchor="w")
+    ttk.Label(approaches, text="• Support Vector Machine (SVM) Classification").pack(anchor="w")
     approaches.pack(pady=5)
     what_is.pack(fill="x", padx=10, pady=5)
-
-    # Naive Bayes Analysis section
-    naive_bayes = ttk.LabelFrame(scrollable_frame, text="Naive Bayes Analysis")
-    ttk.Label(
-        naive_bayes,
-        text="The Naive Bayes classifier uses Bayes' Theorem with a \"naive\" assumption "
-             "of independence between words. The mathematical formula is:",
-        wraplength=500
-    ).pack(pady=5)
-    
-    formula = ttk.Label(
-        naive_bayes,
-        text="P(class|text) ∝ P(class) × ∏ P(word|class)",
-        font=("Courier", 10)
-    )
-    formula.pack(pady=5)
-    
-    components = ttk.Frame(naive_bayes)
-    ttk.Label(components, text="• P(class) - Prior probability of each class (positive/negative/neutral)").pack(anchor="w")
-    ttk.Label(components, text="• P(word|class) - Probability of each word appearing in a given class").pack(anchor="w")
-    ttk.Label(components, text="• ∏ - Product of all word probabilities").pack(anchor="w")
-    components.pack(pady=5)
-    naive_bayes.pack(fill="x", padx=10, pady=5)
 
     # N-gram Analysis section
     ngram = ttk.LabelFrame(scrollable_frame, text="N-gram Analysis")
     ttk.Label(
         ngram,
-        text="N-gram analysis extends beyond individual words to consider sequences of N consecutive words:",
+        text="N-gram analysis examines sequences of consecutive words to understand context and sentiment patterns. "
+             "This method is particularly effective at capturing local context and common sentiment expressions:",
         wraplength=500
     ).pack(pady=5)
     
+    formula = ttk.Label(
+        ngram,
+        text="Score = 0.75 × Bigram_Score + 0.25 × Trigram_Score",
+        font=("Courier", 10, "bold")
+    )
+    formula.pack(pady=5)
+    
     ngram_types = ttk.Frame(ngram)
-    ttk.Label(ngram_types, text="• Unigrams (N=1): Individual words").pack(anchor="w")
-    ttk.Label(ngram_types, text="• Bigrams (N=2): Pairs of consecutive words").pack(anchor="w")
-    ttk.Label(ngram_types, text="• Trigrams (N=3): Sequences of three consecutive words").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Bigrams capture two-word patterns (e.g., 'very good', 'not bad')").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Trigrams capture three-word patterns (e.g., 'not very good')").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Weights favor bigrams (75%) as they are more likely to have an accurate sentiment").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Scores are normalized across sentiment classes").pack(anchor="w")
     ngram_types.pack(pady=5)
+
+    example_frame = ttk.Frame(ngram)
+    ttk.Label(example_frame, 
+              text="Example Analysis:",
+              font=("Helvetica", 9, "bold")).pack(anchor="w")
+    ttk.Label(example_frame, 
+              text="Text: 'not very good'\n"
+              "Bigrams: ['not very', 'very good']\n"
+              "Trigrams: ['not very good']\n"
+              "Final score combines bigram and trigram frequencies").pack(anchor="w")
+    example_frame.pack(pady=5)
     ngram.pack(fill="x", padx=10, pady=5)
+
+    # Naive Bayes Analysis section
+    naive_bayes = ttk.LabelFrame(scrollable_frame, text="Naive Bayes Analysis")
+    ttk.Label(
+        naive_bayes,
+        text="Naive Bayes is a probabilistic classifier that uses Bayes' Theorem to calculate the likelihood of a "
+             "sentiment based on the presence of specific words. It's called 'naive' because it assumes word "
+             "independence:",
+        wraplength=500
+    ).pack(pady=5)
+    
+    formula = ttk.Label(
+        naive_bayes,
+        text="P(sentiment|text) = P(sentiment) × ∏ P(word|sentiment)",
+        font=("Courier", 10, "bold")
+    )
+    formula.pack(pady=5)
+    
+    nb_components = ttk.Frame(naive_bayes)
+    ttk.Label(nb_components, text="• Prior Probability P(sentiment) - Base frequency of each sentiment").pack(anchor="w")
+    ttk.Label(nb_components, text="• Likelihood P(word|sentiment) - Word frequency in each sentiment").pack(anchor="w")
+    ttk.Label(nb_components, text="• Uses TF-IDF for word importance weighting").pack(anchor="w")
+    ttk.Label(nb_components, text="• Applies Laplace smoothing for unseen words").pack(anchor="w")
+    nb_components.pack(pady=5)
+
+    example_frame = ttk.Frame(naive_bayes)
+    ttk.Label(example_frame, 
+              text="Example Analysis:",
+              font=("Helvetica", 9, "bold")).pack(anchor="w")
+    ttk.Label(example_frame, 
+              text="Text: 'great product'\n"
+              "1. Calculate P(positive) from training data\n"
+              "2. Calculate P('great'|positive) and P('product'|positive)\n"
+              "3. Multiply probabilities and normalize").pack(anchor="w")
+    example_frame.pack(pady=5)
+    naive_bayes.pack(fill="x", padx=10, pady=5)
+
+    # SVM Analysis section
+    svm = ttk.LabelFrame(scrollable_frame, text="Support Vector Machine Analysis")
+    ttk.Label(
+        svm,
+        text="SVM is a powerful classifier that finds an optimal hyperplane to separate different sentiment classes "
+             "in a high-dimensional space. It can handle complex, non-linear sentiment patterns through kernel functions:",
+        wraplength=500
+    ).pack(pady=5)
+    
+    formula = ttk.Label(
+        svm,
+        text="f(x) = Σ(αᵢ × K(xᵢ, x) + b)",
+        font=("Courier", 10, "bold")
+    )
+    formula.pack(pady=5)
+    
+    svm_components = ttk.Frame(svm)
+    ttk.Label(svm_components, text="• Kernel Function K(x,y) transforms text into feature space").pack(anchor="w")
+    ttk.Label(svm_components, text="• Support Vectors are the most important training examples").pack(anchor="w")
+    ttk.Label(svm_components, text="• Coefficients αᵢ determine the influence of each support vector").pack(anchor="w")
+    ttk.Label(svm_components, text="• Bias term b adjusts the hyperplane position").pack(anchor="w")
+    svm_components.pack(pady=5)
+
+    example_frame = ttk.Frame(svm)
+    ttk.Label(example_frame, 
+              text="Example Analysis:",
+              font=("Helvetica", 9, "bold")).pack(anchor="w")
+    ttk.Label(example_frame, 
+              text="Text: 'not good but great'\n"
+              "1. Convert text to TF-IDF feature vector\n"
+              "2. Apply kernel transformation\n"
+              "3. Calculate distance from hyperplane\n"
+              "4. Convert to probability using distance").pack(anchor="w")
+    example_frame.pack(pady=5)
+    svm.pack(fill="x", padx=10, pady=5)
+
+    # Final Consensus section
+    consensus = ttk.LabelFrame(scrollable_frame, text="Final Consensus")
+    ttk.Label(
+        consensus,
+        text="The final sentiment combines all three methods to leverage their individual strengths:\n"
+             "• N-grams capture local context and common phrases\n"
+             "• Naive Bayes provides robust probabilistic classification\n"
+             "• SVM handles complex, non-linear sentiment patterns",
+        wraplength=500
+    ).pack(pady=5)
+    
+    formula = ttk.Label(
+        consensus,
+        text="Final_Score = (N-gram_Score + NB_Score + SVM_Score) / 3",
+        font=("Courier", 10, "bold")
+    )
+    formula.pack(pady=5)
+
+    example_frame = ttk.Frame(consensus)
+    ttk.Label(example_frame, 
+              text="Example Combination:",
+              font=("Helvetica", 9, "bold")).pack(anchor="w")
+    ttk.Label(example_frame, 
+              text="N-gram: 70% positive (captures phrases)\n"
+              "Naive Bayes: 65% positive (word probabilities)\n"
+              "SVM: 75% positive (non-linear patterns)\n"
+              "Final Score: 70% positive (averaged)").pack(anchor="w")
+    example_frame.pack(pady=5)
+    consensus.pack(fill="x", padx=10, pady=5)
 
     # Key Features section
     features = ttk.LabelFrame(scrollable_frame, text="Key Features")
@@ -849,11 +1062,11 @@ def create_about_tab(tab):
     scrollbar.pack(side="right", fill="y")
 
 # Modify your existing code to add the About tab
-tab4 = ttk.Frame(tab_control)
-tab_control.add(tab4, text="About")
-create_about_tab(tab4)
+create_about_tab(about_tab)
 
 def create_numbers_tab(tab):
+    frames = {}  # Store frames in a dictionary to maintain references
+    
     # Create a notebook for sub-tabs within Numbers tab
     numbers_notebook = ttk.Notebook(tab)
     
@@ -867,163 +1080,121 @@ def create_numbers_tab(tab):
     numbers_notebook.add(svm_tab, text="SVM Details")
     numbers_notebook.pack(expand=1, fill="both")
 
-    # N-gram Analysis Tab
-    def update_ngram_viz():
-        text = text_entry.get("1.0", tk.END).strip()
-        if not text:
+    # Create persistent frames
+    frames['ngram'] = ttk.Frame(ngram_tab)
+    frames['nb'] = ttk.Frame(nb_tab)
+    frames['svm'] = ttk.Frame(svm_tab)
+
+    for frame in frames.values():
+        frame.pack(fill=tk.BOTH, expand=1)
+
+    def update_viz():
+        if not last_analyzed_text or not last_analyzed_scores:
             return
 
-        # Clear previous plots
-        for widget in ngram_frame.winfo_children():
+        try:
+            current_tab = numbers_notebook.select()
+            if not current_tab:
+                return
+
+            tab_name = numbers_notebook.tab(current_tab)['text']
+            
+            if tab_name == "N-gram Details":
+                update_viz_content(frames['ngram'], 'ngram')
+            elif tab_name == "Naive Bayes Details":
+                update_viz_content(frames['nb'], 'naive_bayes')
+            elif tab_name == "SVM Details":
+                update_viz_content(frames['svm'], 'svm')
+        except Exception as e:
+            print(f"Error updating visualization: {str(e)}")
+
+    # Store the update_viz function as an attribute of the tab
+    tab.update_viz = update_viz
+
+    def update_viz_content(frame, method):
+        # Clear existing widgets
+        for widget in frame.winfo_children():
             widget.destroy()
 
-        # Create figure for N-gram visualization
+        # Add formula at the top
+        if method == 'ngram':
+            formula_text = "Score = 0.75 × Bigram_Score + 0.25 × Trigram_Score"
+            explanation = "Weighted combination of bigram and trigram frequencies"
+        elif method == 'naive_bayes':
+            formula_text = "P(sentiment|text) = P(sentiment) × ∏ P(word|sentiment)"
+            explanation = "Product of prior and word probabilities"
+        else:  # SVM
+            formula_text = "f(x) = Σ(αᵢ × K(xᵢ, x) + b)"
+            explanation = "Where K is the kernel function and αᵢ are support vector coefficients"
+
+        formula_label = ttk.Label(frame, text=formula_text, font=("Courier", 10, "bold"))
+        formula_label.pack(pady=(10, 0))
+        explanation_label = ttk.Label(frame, text=explanation, font=("Helvetica", 9, "italic"))
+        explanation_label.pack(pady=(0, 10))
+
+        # Create figure
         fig = Figure(figsize=(10, 6))
         ax = fig.add_subplot(111)
 
-        # Get N-gram counts
-        bigrams = analyzer.get_ngrams(text, 2)
-        trigrams = analyzer.get_ngrams(text, 3)
-
-        # Calculate probabilities
-        sentiments = ['positive', 'neutral', 'negative']
-        bigram_probs = {s: [] for s in sentiments}
-        trigram_probs = {s: [] for s in sentiments}
-
-        for b in bigrams:
-            for s in sentiments:
-                prob = analyzer.ngram_counts['bigram'][s].get(b, 0)
-                bigram_probs[s].append(prob)
-
-        for t in trigrams:
-            for s in sentiments:
-                prob = analyzer.ngram_counts['trigram'][s].get(t, 0)
-                trigram_probs[s].append(prob)
-
-        # Plot
-        x = np.arange(len(bigrams))
-        width = 0.25
-
-        for i, s in enumerate(sentiments):
-            ax.bar(x + i*width, bigram_probs[s], width, label=f'{s} (bigrams)')
-
-        ax.set_xticks(x + width)
-        ax.set_xticklabels(bigrams, rotation=45, ha='right')
-        ax.legend()
-        ax.set_title('N-gram Probability Distribution')
-
-        canvas = FigureCanvasTkAgg(fig, master=ngram_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-
-        # Add formula explanation
-        formula_text = (
-            "N-gram Model Formula:\n"
-            "P(sentiment|text) = Σ(w_b * P(bigram|sentiment) + w_t * P(trigram|sentiment))\n"
-            "where w_b=0.75 and w_t=0.25 are bigram and trigram weights"
-        )
-        tk.Label(ngram_frame, text=formula_text, justify=tk.LEFT).pack(pady=10)
-
-    # Naive Bayes Tab
-    def update_nb_viz():
-        text = text_entry.get("1.0", tk.END).strip()
-        if not text:
-            return
-
-        # Clear previous plots
-        for widget in nb_frame.winfo_children():
-            widget.destroy()
-
-        # Create figure for NB visualization
-        fig = Figure(figsize=(10, 6))
-        ax = fig.add_subplot(111)
-
-        # Get word probabilities
-        X = analyzer.vectorizer.transform([text])
-        feature_names = analyzer.vectorizer.get_feature_names_out()
-        word_probs = analyzer.nb_model.feature_log_prob_
-
-        # Plot word probabilities
-        x = np.arange(len(feature_names))
-        width = 0.25
-
-        for i, sentiment in enumerate(['positive', 'neutral', 'negative']):
-            ax.bar(x + i*width, np.exp(word_probs[i]), width, label=sentiment)
-
-        ax.set_xticks(x + width)
-        ax.set_xticklabels(feature_names, rotation=45, ha='right')
-        ax.legend()
-        ax.set_title('Word Probability Distribution (Naive Bayes)')
-
-        canvas = FigureCanvasTkAgg(fig, master=nb_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-
-        # Add formula explanation
-        formula_text = (
-            "Naive Bayes Formula:\n"
-            "P(sentiment|text) = P(sentiment) * Π P(word|sentiment)\n"
-            "Log space: log(P(sentiment|text)) = log(P(sentiment)) + Σ log(P(word|sentiment))"
-        )
-        tk.Label(nb_frame, text=formula_text, justify=tk.LEFT).pack(pady=10)
-
-    # SVM Tab
-    def update_svm_viz():
-        text = text_entry.get("1.0", tk.END).strip()
-        if not text:
-            return
-
-        # Clear previous plots
-        for widget in svm_frame.winfo_children():
-            widget.destroy()
-
-        # Create figure for SVM visualization
-        fig = Figure(figsize=(10, 6))
-        ax = fig.add_subplot(111)
-
-        # Get SVM decision function values
-        X = analyzer.svm_model.named_steps['tfidfvectorizer'].transform([text])
-        decision_values = analyzer.svm_model.named_steps['svc'].decision_function(X)
-
-        # Plot decision boundaries
-        sentiments = ['positive', 'neutral', 'negative']
+        # Plot scores
+        sentiments = list(last_analyzed_scores[method].keys())
+        values = [last_analyzed_scores[method][s] for s in sentiments]
         x = np.arange(len(sentiments))
         
-        ax.bar(x, decision_values[0], width=0.5)
+        bars = ax.bar(x, values)
         ax.set_xticks(x)
         ax.set_xticklabels(sentiments)
-        ax.set_title('SVM Decision Function Values')
+        ax.set_title(f'{method.replace("_", " ").title()} Analysis Scores')
+        ax.set_ylabel('Probability (%)')
 
-        canvas = FigureCanvasTkAgg(fig, master=svm_frame)
+        # Add value labels on bars
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}%', ha='center', va='bottom')
+
+        # Add the plot to the frame
+        canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Add formula explanation
-        formula_text = (
-            "SVM Formula:\n"
-            "f(x) = Σ(α_i * K(x_i, x) + b)\n"
-            "where K is the kernel function and α_i are the support vector coefficients"
-        )
-        tk.Label(svm_frame, text=formula_text, justify=tk.LEFT).pack(pady=10)
+        # Add detailed explanation at the bottom
+        formula_frame = ttk.LabelFrame(frame, text=f"Detailed {method.replace('_', ' ').title()} Explanation")
+        formula_frame.pack(fill=tk.X, padx=5, pady=5)
 
-    # Create frames for each analysis type
-    ngram_frame = ttk.Frame(ngram_tab)
-    nb_frame = ttk.Frame(nb_tab)
-    svm_frame = ttk.Frame(svm_tab)
+        if method == 'ngram':
+            detail_text = (
+                "N-gram Analysis calculates sentiment scores by:\n"
+                "1. Counting bigram (2-word) and trigram (3-word) frequencies\n"
+                "2. Weighing bigrams at 75% and trigrams at 25%\n"
+                "3. Normalizing scores across all sentiment classes"
+            )
+        elif method == 'naive_bayes':
+            detail_text = (
+                "Naive Bayes calculates sentiment probability by:\n"
+                "1. Computing prior probability P(sentiment)\n"
+                "2. Computing word likelihood P(word|sentiment)\n"
+                "3. Multiplying probabilities and normalizing results"
+            )
+        else:  # SVM
+            detail_text = (
+                "Support Vector Machine classification:\n"
+                "1. Maps text to high-dimensional space using kernel function\n"
+                "2. Finds optimal hyperplane separating sentiment classes\n"
+                "3. Calculates probability based on distance from hyperplane"
+            )
 
-    ngram_frame.pack(fill=tk.BOTH, expand=1)
-    nb_frame.pack(fill=tk.BOTH, expand=1)
-    svm_frame.pack(fill=tk.BOTH, expand=1)
+        ttk.Label(formula_frame, text=detail_text, justify=tk.LEFT, wraplength=500).pack(padx=10, pady=5)
 
-    # Add update buttons
-    ttk.Button(ngram_frame, text="Update N-gram Analysis", command=update_ngram_viz).pack(pady=5)
-    ttk.Button(nb_frame, text="Update Naive Bayes Analysis", command=update_nb_viz).pack(pady=5)
-    ttk.Button(svm_frame, text="Update SVM Analysis", command=update_svm_viz).pack(pady=5)
+    # Add update button at the top of the Numbers tab
+    update_button = ttk.Button(tab, text="Update Visualization", command=update_viz)
+    update_button.pack(pady=5)
+
+    # Bind tab change event
+    numbers_notebook.bind('<<NotebookTabChanged>>', lambda e: update_viz())
 
 # Add the Numbers tab to the main notebook
-tab5 = ttk.Frame(tab_control)
-tab_control.add(tab5, text="Numbers")
-create_numbers_tab(tab5)
+create_numbers_tab(numbers_tab)
 
 # Start the main event loop
 root.mainloop()
