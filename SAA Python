@@ -191,31 +191,34 @@ class SentimentAnalyzer:
         progress_window = tk.Toplevel()
         progress_window.title("Importing Data")
         progress_window.geometry("300x150")
+        progress_window.transient(root)  # Make window modal
+        progress_window.grab_set()  # Make window modal
         
         progress_label = ttk.Label(progress_window, text="Reading CSV file...")
         progress_label.pack(pady=10)
         
-        progress_bar = ttk.Progressbar(progress_window, length=200, mode='determinate')
-        progress_bar.pack(pady=10)
+        # Create frame for progress bar and percentage
+        progress_frame = ttk.Frame(progress_window)
+        progress_frame.pack(pady=10)
+        
+        progress_bar = ttk.Progressbar(progress_frame, length=200, mode='determinate')
+        progress_bar.pack(side=tk.LEFT, padx=(0, 5))
+        
+        percentage_label = ttk.Label(progress_frame, text="0%")
+        percentage_label.pack(side=tk.LEFT)
         
         try:
             # First count total lines for progress tracking
-            total_lines = sum(1 for _ in open(filepath, 'r', encoding='utf-8')) - 1  # Subtract header
+            with open(filepath, 'r', encoding='utf-8-sig') as file:  # Use utf-8-sig to handle BOM
+                total_lines = sum(1 for _ in file) - 1  # Subtract header
             progress_bar['maximum'] = total_lines
-            
-            # Clear existing training data
-            self.sentiment_data = {
-                'positive': [],
-                'neutral': [],
-                'negative': []
-            }
             
             # Process in batches
             BATCH_SIZE = 1000
             current_batch = []
             processed_lines = 0
             
-            with open(filepath, 'r', encoding='utf-8') as file:
+            with open(filepath, 'r', encoding='utf-8-sig') as file:  # Use utf-8-sig to handle BOM
                 reader = csv.DictReader(file)
                 
                 for row in reader:
@@ -224,6 +227,7 @@ class SentimentAnalyzer:
                     
                     if sentiment in self.sentiment_data:
                         current_batch.append((text, sentiment))
+                        processed_lines += 1
                         
                         if len(current_batch) >= BATCH_SIZE:
                             # Process batch
@@ -232,25 +236,44 @@ class SentimentAnalyzer:
                             current_batch = []
                             
                             # Update progress
-                            processed_lines += BATCH_SIZE
                             progress_bar['value'] = processed_lines
+                            percentage = min(100, int((processed_lines / total_lines) * 100))
+                            percentage_label.config(text=f"{percentage}%")
                             progress_label.config(text=f"Processed {processed_lines:,} of {total_lines:,} entries")
                             progress_window.update()
                 
                 # Process remaining items
                 for text, sent in current_batch:
                     self.sentiment_data[sent].append(text)
+                
+                # Ensure progress bar shows 100%
+                progress_bar['value'] = total_lines
+                percentage_label.config(text="100%")
+                progress_label.config(text=f"Processed {total_lines:,} of {total_lines:,} entries")
+                progress_window.update()
             
             progress_label.config(text="Training model...")
             progress_window.update()
             
+            def cleanup():
+                try:
+                    root.after(1, progress_window.destroy)  # Schedule window destruction
+                    root.after(100, lambda: messagebox.showinfo("Success", "Training data imported and model trained successfully"))
+                    root.after(200, update_training_data_view)
+                except:
+                    pass
+            
             # Train in a separate thread to prevent UI freeze
             def train_thread():
-                self.train()
-                progress_window.destroy()
-                messagebox.showinfo("Success", "Training data imported and model trained successfully")
+                try:
+                    self.train()
+                    root.after(1, cleanup)  # Schedule cleanup on main thread using root instead of progress_window
+                except Exception as e:
+                    root.after(1, progress_window.destroy)
+                    root.after(100, lambda: messagebox.showerror("Error", f"Error training model: {str(e)}"))
             
-            threading.Thread(target=train_thread).start()
+            training_thread = threading.Thread(target=train_thread, daemon=True)
+            training_thread.start()
             
         except Exception as e:
             progress_window.destroy()
