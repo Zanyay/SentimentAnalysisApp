@@ -532,8 +532,9 @@ def create_numbers_tab(tab):
                     trigram_details += f"\n\n'{trigram}' appears {total_occurrences} time{'s' if total_occurrences != 1 else ''} in training data:"
                     for sentiment in ['positive', 'neutral', 'negative']:
                         count = analyzer.ngram_counts['trigram'][sentiment][trigram]
-                        percentage = (count / total_occurrences) * 100
-                        trigram_details += f"\n  {sentiment}: {count} time{'s' if count != 1 else ''} ({percentage:.1f}%)"
+                        if count > 0:  # Only show non-zero counts
+                            percentage = (count / total_occurrences) * 100
+                            trigram_details += f"\n  {sentiment}: {count} time{'s' if count != 1 else ''} ({percentage:.1f}%)"
                 else:
                     trigram_details += f"\n\n'{trigram}' not found in training data"
 
@@ -581,8 +582,11 @@ def create_numbers_tab(tab):
             ax2 = fig.add_subplot(312)  # 3 rows, 1 column, second plot
             trigram_values = []
             for sentiment in sentiments:
-                # Calculate total trigram score for each sentiment
-                total = sum(analyzer.ngram_counts['trigram'][sentiment][trigram] for trigram in trigrams)
+                # Calculate total trigram score for each sentiment by summing all trigrams
+                total = sum(
+                    analyzer.ngram_counts['trigram'][sentiment][t] 
+                    for t in trigrams
+                )
                 trigram_values.append(total)
             
             total_trigram = sum(trigram_values) or 1
