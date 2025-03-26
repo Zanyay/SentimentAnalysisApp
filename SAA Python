@@ -258,8 +258,7 @@ class SentimentAnalyzer:
             def cleanup():
                 try:
                     root.after(1, progress_window.destroy)  # Schedule window destruction
-                    root.after(100, lambda: messagebox.showinfo("Success", "Training data imported and model trained successfully"))
-                    root.after(200, update_training_data_view)
+                    root.after(200, update_training_data_view)  # Update the view after cleanup
                 except:
                     pass
             
