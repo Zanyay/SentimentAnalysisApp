@@ -494,7 +494,7 @@ def update_viz_content(frame, method):
     formula_frame.pack(fill=tk.X, pady=5)
 
     if method == 'ngram':
-        formula_text = "Score = 0.67 × Bigram_Score + 0.33 × Trigram_Score"  # Updated formula
+        formula_text = "Score = 0.67 × Bigram_Score + 0.33 × Trigram_Score"
         explanation = "Weighted combination of bigram and trigram frequencies"
         
         # Get all n-grams from the text
@@ -628,41 +628,135 @@ def update_viz_content(frame, method):
     elif method == 'naive_bayes':
         formula_text = "P(sentiment|text) = P(sentiment) × ∏ P(word|sentiment)"
         explanation = "Probability calculation using Bayes' theorem with word frequencies"
-        words = [w for w in last_analyzed_text.lower().split() if w in analyzer.vectorizer.get_feature_names_out()]
-        calc_details = (
-            f"Text analyzed: '{last_analyzed_text}'\n\n"
-            f"Words analyzed: {', '.join(words)}\n\n"
-            f"Class probabilities:\n"
-            f"Positive: {last_analyzed_scores['naive_bayes']['positive']:.2f}%\n"
-            f"Neutral: {last_analyzed_scores['naive_bayes']['neutral']:.2f}%\n"
-            f"Negative: {last_analyzed_scores['naive_bayes']['negative']:.2f}%"
-        )
-
-        # Keep original single graph for naive_bayes
-        graph_frame = ttk.LabelFrame(main_content, text="Visualization")
-        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
-        fig = Figure(figsize=(8, 4))
-        ax = fig.add_subplot(111)
-
-        sentiments = ['positive', 'neutral', 'negative']
-        values = [last_analyzed_scores[method][s] for s in sentiments]
-        x = np.arange(len(sentiments))
         
-        bars = ax.bar(x, values)
-        ax.set_xticks(x)
-        ax.set_xticklabels(sentiments)
-        ax.set_title(f'{method.replace("_", " ").title()} Analysis Scores')
-        ax.set_ylabel('Probability (%)')
+        # Extract words from the text that are in the vocabulary
+        words = [w for w in analyzer.preprocess_text(last_analyzed_text).split() 
+                if w in analyzer.vectorizer.get_feature_names_out()]
+        
+        # If no words found in vocabulary, show simple bar chart
+        if not words:
+            # Keep original single graph for naive_bayes
+            graph_frame = ttk.LabelFrame(main_content, text="Visualization")
+            graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        for bar in bars:
-            height = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width()/2., height,
-                    f'{height:.1f}%', ha='center', va='bottom')
+            fig = Figure(figsize=(8, 4))
+            ax = fig.add_subplot(111)
 
-        canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            sentiments = ['positive', 'neutral', 'negative']
+            values = [last_analyzed_scores[method][s] for s in sentiments]
+            x = np.arange(len(sentiments))
+            
+            bars = ax.bar(x, values)
+            ax.set_xticks(x)
+            ax.set_xticklabels(sentiments)
+            ax.set_title(f'{method.replace("_", " ").title()} Analysis Scores')
+            ax.set_ylabel('Probability (%)')
+
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                        f'{height:.1f}%', ha='center', va='bottom')
+
+            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            calc_details = (
+                f"Text analyzed: '{last_analyzed_text}'\n\n"
+                f"No words from this text were found in the vocabulary.\n\n"
+                f"Final probabilities:\n"
+                f"Positive: {last_analyzed_scores['naive_bayes']['positive']:.2f}%\n"
+                f"Neutral: {last_analyzed_scores['naive_bayes']['neutral']:.2f}%\n"
+                f"Negative: {last_analyzed_scores['naive_bayes']['negative']:.2f}%"
+            )
+        else:
+            # Limit to top 15 words if there are too many
+            if len(words) > 15:
+                words = words[:15]
+                
+            # Get feature indices for these words
+            word_indices = [list(analyzer.vectorizer.get_feature_names_out()).index(w) for w in words]
+            
+            # Get prior probabilities
+            prior_probs = analyzer.nb_model.class_log_prior_
+            sentiments = analyzer.nb_model.classes_
+            
+            # Create heatmap data for word probabilities P(word|sentiment)
+            heatmap_data = np.zeros((len(words), len(sentiments)))
+            
+            for i, word_idx in enumerate(word_indices):
+                for j, sentiment in enumerate(sentiments):
+                    # Get conditional probability of word given sentiment
+                    word_prob = np.exp(analyzer.nb_model.feature_log_prob_[j][word_idx])
+                    heatmap_data[i, j] = word_prob * 100  # Convert to percentage
+            
+            # Create graph frame
+            graph_frame = ttk.LabelFrame(main_content, text="Word Probability Heatmap")
+            graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            
+            # Create figure with appropriate size
+            fig = Figure(figsize=(10, max(4, len(words) * 0.4)))
+            ax = fig.add_subplot(111)
+            
+            # Create heatmap
+            im = ax.imshow(heatmap_data, 
+                          cmap='YlGnBu',  # Yellow-Green-Blue colormap
+                          aspect='auto',
+                          interpolation='nearest',
+                          vmin=0)  # Min value 0, max automatically determined
+            
+            # Set labels
+            ax.set_xticks(np.arange(len(sentiments)))
+            ax.set_yticks(np.arange(len(words)))
+            ax.set_xticklabels(sentiments)
+            ax.set_yticklabels(words)
+            ax.set_title('Naive Bayes Word Probabilities P(word|sentiment)')
+            
+            # Rotate x labels
+            plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+            
+            # Add colorbar
+            cbar = fig.colorbar(im, ax=ax)
+            cbar.set_label('P(word|sentiment) %')
+            
+            # Add annotations
+            for i in range(len(words)):
+                for j in range(len(sentiments)):
+                    value = heatmap_data[i, j]
+                    text_color = "white" if value > 50 else "black"
+                    ax.text(j, i, f'{value:.1f}%',
+                           ha="center", va="center", 
+                           color=text_color)
+            
+            # Adjust layout
+            fig.tight_layout()
+            
+            # Create canvas
+            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Calculate Bayesian statistics for the details section
+            prior_text = "Prior probabilities P(sentiment):\n"
+            for i, sentiment in enumerate(sentiments):
+                prior_text += f"• {sentiment}: {np.exp(prior_probs[i]):.4f}\n"
+            
+            word_detail_text = "\nWord probabilities P(word|sentiment):\n"
+            for i, word in enumerate(words):
+                word_detail_text += f"• '{word}': "
+                for j, sentiment in enumerate(sentiments):
+                    word_detail_text += f"{sentiment}: {heatmap_data[i,j]:.2f}%  "
+                word_detail_text += "\n"
+                
+            calc_details = (
+                f"Text analyzed: '{last_analyzed_text}'\n\n"
+                f"{prior_text}\n"
+                f"{word_detail_text}\n"
+                f"Final probabilities P(sentiment|text):\n"
+                f"Positive: {last_analyzed_scores['naive_bayes']['positive']:.2f}%\n"
+                f"Neutral: {last_analyzed_scores['naive_bayes']['neutral']:.2f}%\n"
+                f"Negative: {last_analyzed_scores['naive_bayes']['negative']:.2f}%"
+            )
 
     else:  # SVM
         formula_text = "f(x) = Σ(αᵢ × K(xᵢ, x) + b)"
