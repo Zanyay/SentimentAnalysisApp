@@ -16,8 +16,8 @@ import numpy as np
 from matplotlib.figure import Figure
 import math
 import csv
-import queue  # Add new import
-import threading  # Add new import
+import queue
+import threading
 
 class SentimentAnalyzer:
     def __init__(self):
@@ -474,245 +474,314 @@ def create_numbers_tab(tab):
     # Initialize all tabs
     update_viz()
 
-    def update_viz_content(frame, method):
-        # Clear existing widgets
-        for widget in frame.winfo_children():
-            widget.destroy()
+def update_viz_content(frame, method):
+    # Clear existing widgets
+    for widget in frame.winfo_children():
+        widget.destroy()
 
-        # Create a main frame for content
-        main_content = ttk.Frame(frame)
-        main_content.pack(fill=tk.BOTH, expand=True)
+    # Create a main frame for content
+    main_content = ttk.Frame(frame)
+    main_content.pack(fill=tk.BOTH, expand=True)
 
-        # Create left and right columns
-        left_column = ttk.Frame(main_content)
-        right_column = ttk.Frame(main_content)
-        left_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
-        right_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+    # Create left and right columns
+    left_column = ttk.Frame(main_content)
+    right_column = ttk.Frame(main_content)
+    left_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+    right_column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
 
-        # Formula and Explanation (Left Column)
-        formula_frame = ttk.LabelFrame(left_column, text="Model Formula")
-        formula_frame.pack(fill=tk.X, pady=5)
+    # Formula and Explanation (Left Column)
+    formula_frame = ttk.LabelFrame(left_column, text="Model Formula")
+    formula_frame.pack(fill=tk.X, pady=5)
 
-        if method == 'ngram':
-            formula_text = "Score = 0.75 × Bigram_Score + 0.25 × Trigram_Score"
-            explanation = "Weighted combination of bigram and trigram frequencies"
-            
-            # Get all n-grams from the text
-            bigrams = analyzer.get_ngrams(last_analyzed_text, 2)
-            trigrams = analyzer.get_ngrams(last_analyzed_text, 3)
-            
-            # Calculate bigram confidences
-            bigram_details = "\nBigram Analysis:"
-            for bigram in bigrams:
-                # Get total occurrences of this bigram across all sentiments
-                total_occurrences = sum(
-                    analyzer.ngram_counts['bigram'][sentiment][bigram]
-                    for sentiment in ['positive', 'neutral', 'negative']
-                )
-                
-                if total_occurrences > 0:  # Only show if bigram exists in training data
-                    bigram_details += f"\n\n'{bigram}' appears {total_occurrences} time{'s' if total_occurrences != 1 else ''} in training data:"
-                    for sentiment in ['positive', 'neutral', 'negative']:
-                        count = analyzer.ngram_counts['bigram'][sentiment][bigram]
-                        percentage = (count / total_occurrences) * 100
-                        bigram_details += f"\n  {sentiment}: {count} time{'s' if count != 1 else ''} ({percentage:.1f}%)"
-                else:
-                    bigram_details += f"\n\n'{bigram}' not found in training data"
-
-            # Calculate trigram confidences
-            trigram_details = "\n\nTrigram Analysis:"
-            for trigram in trigrams:
-                # Get total occurrences of this trigram across all sentiments
-                total_occurrences = sum(
-                    analyzer.ngram_counts['trigram'][sentiment][trigram]
-                    for sentiment in ['positive', 'neutral', 'negative']
-                )
-                
-                if total_occurrences > 0:  # Only show if trigram exists in training data
-                    trigram_details += f"\n\n'{trigram}' appears {total_occurrences} time{'s' if total_occurrences != 1 else ''} in training data:"
-                    for sentiment in ['positive', 'neutral', 'negative']:
-                        count = analyzer.ngram_counts['trigram'][sentiment][trigram]
-                        if count > 0:  # Only show non-zero counts
-                            percentage = (count / total_occurrences) * 100
-                            trigram_details += f"\n  {sentiment}: {count} time{'s' if count != 1 else ''} ({percentage:.1f}%)"
-                else:
-                    trigram_details += f"\n\n'{trigram}' not found in training data"
-
-            calc_details = (
-                f"Text analyzed: '{last_analyzed_text}'\n"
-                f"{bigram_details}\n"
-                f"{trigram_details}\n\n"
-                f"Final weighted scores:\n"
-                f"Positive: {last_analyzed_scores['ngram']['positive']:.2f}%\n"
-                f"Neutral: {last_analyzed_scores['ngram']['neutral']:.2f}%\n"
-                f"Negative: {last_analyzed_scores['ngram']['negative']:.2f}%"
-            )
-
-            # Graph (Bottom) - Modified to show 3 separate graphs
-            graph_frame = ttk.LabelFrame(main_content, text="Visualization")
-            graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
-            # Create figure with 3 subplots
-            fig = Figure(figsize=(6, 8))
-            
-            # Bigram graph
-            ax1 = fig.add_subplot(311)  # 3 rows, 1 column, first plot
-            sentiments = ['positive', 'neutral', 'negative']
-            bigram_values = []
-            for sentiment in sentiments:
-                # Calculate total bigram score for each sentiment
-                total = sum(analyzer.ngram_counts['bigram'][sentiment][bigram] for bigram in bigrams)
-                bigram_values.append(total)
-            
-            total_bigram = sum(bigram_values) or 1
-            bigram_percentages = [v * 100 / total_bigram for v in bigram_values]
-            
-            bars = ax1.bar(np.arange(len(sentiments)), bigram_percentages)
-            ax1.set_xticks(np.arange(len(sentiments)))
-            ax1.set_xticklabels(sentiments)
-            ax1.set_title('Bigram Analysis')
-            ax1.set_ylabel('Percentage (%)')
-            
-            for bar in bars:
-                height = bar.get_height()
-                ax1.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.1f}%', ha='center', va='bottom')
-
-            # Trigram graph
-            ax2 = fig.add_subplot(312)  # 3 rows, 1 column, second plot
-            trigram_values = []
-            for sentiment in sentiments:
-                # Calculate total trigram score for each sentiment by summing all trigrams
-                total = sum(
-                    analyzer.ngram_counts['trigram'][sentiment][t] 
-                    for t in trigrams
-                )
-                trigram_values.append(total)
-            
-            total_trigram = sum(trigram_values) or 1
-            trigram_percentages = [v * 100 / total_trigram for v in trigram_values]
-            
-            bars = ax2.bar(np.arange(len(sentiments)), trigram_percentages)
-            ax2.set_xticks(np.arange(len(sentiments)))
-            ax2.set_xticklabels(sentiments)
-            ax2.set_title('Trigram Analysis')
-            ax2.set_ylabel('Percentage (%)')
-            
-            for bar in bars:
-                height = bar.get_height()
-                ax2.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.1f}%', ha='center', va='bottom')
-
-            # Final weighted scores graph
-            ax3 = fig.add_subplot(313)  # 3 rows, 1 column, third plot
-            values = [last_analyzed_scores[method][s] for s in sentiments]
-            
-            bars = ax3.bar(np.arange(len(sentiments)), values)
-            ax3.set_xticks(np.arange(len(sentiments)))
-            ax3.set_xticklabels(sentiments)
-            ax3.set_title('Final Weighted Scores (75% Bigram + 25% Trigram)')
-            ax3.set_ylabel('Score (%)')
-            
-            for bar in bars:
-                height = bar.get_height()
-                ax3.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.1f}%', ha='center', va='bottom')
-
-            # Adjust layout to prevent overlap
-            fig.tight_layout(pad=3.0)
-
-            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        elif method == 'naive_bayes':
-            formula_text = "P(sentiment|text) = P(sentiment) × ∏ P(word|sentiment)"
-            explanation = "Probability calculation using Bayes' theorem with word frequencies"
-            words = [w for w in last_analyzed_text.lower().split() if w in analyzer.vectorizer.get_feature_names_out()]
-            calc_details = (
-                f"Text analyzed: '{last_analyzed_text}'\n\n"
-                f"Words analyzed: {', '.join(words)}\n\n"
-                f"Class probabilities:\n"
-                f"Positive: {last_analyzed_scores['naive_bayes']['positive']:.2f}%\n"
-                f"Neutral: {last_analyzed_scores['naive_bayes']['neutral']:.2f}%\n"
-                f"Negative: {last_analyzed_scores['naive_bayes']['negative']:.2f}%"
-            )
-
-            # Keep original single graph for naive_bayes
-            graph_frame = ttk.LabelFrame(main_content, text="Visualization")
-            graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
-            fig = Figure(figsize=(8, 4))
-            ax = fig.add_subplot(111)
-
-            sentiments = ['positive', 'neutral', 'negative']
-            values = [last_analyzed_scores[method][s] for s in sentiments]
-            x = np.arange(len(sentiments))
-            
-            bars = ax.bar(x, values)
-            ax.set_xticks(x)
-            ax.set_xticklabels(sentiments)
-            ax.set_title(f'{method.replace("_", " ").title()} Analysis Scores')
-            ax.set_ylabel('Probability (%)')
-
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.1f}%', ha='center', va='bottom')
-
-            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        else:  # SVM
-            formula_text = "f(x) = Σ(αᵢ × K(xᵢ, x) + b)"
-            explanation = "Support Vector Machine with TF-IDF features and RBF kernel"
-            calc_details = (
-                f"Text analyzed: '{last_analyzed_text}'\n\n"
-                f"TF-IDF Features: {len(analyzer.svm_model.named_steps['tfidfvectorizer'].get_feature_names_out())} total features\n\n"
-                f"Classification probabilities:\n"
-                f"Positive: {last_analyzed_scores['svm']['positive']:.2f}%\n"
-                f"Neutral: {last_analyzed_scores['svm']['neutral']:.2f}%\n"
-                f"Negative: {last_analyzed_scores['svm']['negative']:.2f}%"
-            )
-
-            # Keep original single graph for SVM
-            graph_frame = ttk.LabelFrame(main_content, text="Visualization")
-            graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-
-            fig = Figure(figsize=(8, 4))
-            ax = fig.add_subplot(111)
-
-            sentiments = ['positive', 'neutral', 'negative']
-            values = [last_analyzed_scores[method][s] for s in sentiments]
-            x = np.arange(len(sentiments))
-            
-            bars = ax.bar(x, values)
-            ax.set_xticks(x)
-            ax.set_xticklabels(sentiments)
-            ax.set_title(f'{method.replace("_", " ").title()} Analysis Scores')
-            ax.set_ylabel('Probability (%)')
-
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                        f'{height:.1f}%', ha='center', va='bottom')
-
-            canvas = FigureCanvasTkAgg(fig, master=graph_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(formula_frame, text=formula_text, font=("Courier", 10, "bold")).pack(pady=5)
-        ttk.Label(formula_frame, text=explanation, font=("Helvetica", 9, "italic")).pack(pady=5)
-
-        # Live Calculations (Right Column)
-        calc_frame = ttk.LabelFrame(right_column, text="Live Calculations")
-        calc_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+    if method == 'ngram':
+        formula_text = "Score = 0.75 × Bigram_Score + 0.25 × Trigram_Score"
+        explanation = "Weighted combination of bigram and trigram frequencies"
         
-        calc_text = tk.Text(calc_frame, wrap=tk.WORD, height=20, width=50)
-        calc_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        calc_text.insert(tk.END, calc_details)
-        calc_text.config(state=tk.DISABLED)
+        # Get all n-grams from the text
+        bigrams = analyzer.get_ngrams(last_analyzed_text, 2)
+        trigrams = analyzer.get_ngrams(last_analyzed_text, 3)
+        
+        # Calculate bigram confidences
+        bigram_details = "\nBigram Analysis:"
+        for bigram in bigrams:
+            # Get total occurrences of this bigram across all sentiments
+            total_occurrences = sum(
+                analyzer.ngram_counts['bigram'][sentiment][bigram]
+                for sentiment in ['positive', 'neutral', 'negative']
+            )
+            
+            if total_occurrences > 0:  # Only show if bigram exists in training data
+                bigram_details += f"\n\n'{bigram}' appears {total_occurrences} time{'s' if total_occurrences != 1 else ''} in training data:"
+                for sentiment in ['positive', 'neutral', 'negative']:
+                    count = analyzer.ngram_counts['bigram'][sentiment][bigram]
+                    percentage = (count / total_occurrences) * 100
+                    bigram_details += f"\n  {sentiment}: {count} time{'s' if count != 1 else ''} ({percentage:.1f}%)"
+            else:
+                bigram_details += f"\n\n'{bigram}' not found in training data"
+
+        # Calculate trigram confidences
+        trigram_details = "\n\nTrigram Analysis:"
+        for trigram in trigrams:
+            # Get total occurrences of this trigram across all sentiments
+            total_occurrences = sum(
+                analyzer.ngram_counts['trigram'][sentiment][trigram]
+                for sentiment in ['positive', 'neutral', 'negative']
+            )
+            
+            if total_occurrences > 0:  # Only show if trigram exists in training data
+                trigram_details += f"\n\n'{trigram}' appears {total_occurrences} time{'s' if total_occurrences != 1 else ''} in training data:"
+                for sentiment in ['positive', 'neutral', 'negative']:
+                    count = analyzer.ngram_counts['trigram'][sentiment][trigram]
+                    if count > 0:  # Only show non-zero counts
+                        percentage = (count / total_occurrences) * 100
+                        trigram_details += f"\n  {sentiment}: {count} time{'s' if count != 1 else ''} ({percentage:.1f}%)"
+            else:
+                trigram_details += f"\n\n'{trigram}' not found in training data"
+
+        calc_details = (
+            f"Text analyzed: '{last_analyzed_text}'\n"
+            f"{bigram_details}\n"
+            f"{trigram_details}\n\n"
+            f"Final weighted scores:\n"
+            f"Positive: {last_analyzed_scores['ngram']['positive']:.2f}%\n"
+            f"Neutral: {last_analyzed_scores['ngram']['neutral']:.2f}%\n"
+            f"Negative: {last_analyzed_scores['ngram']['negative']:.2f}%"
+        )
+
+        # Graph (Bottom) - Modified to show 3 separate graphs
+        graph_frame = ttk.LabelFrame(main_content, text="Visualization")
+        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        # Create figure with 3 subplots
+        fig = Figure(figsize=(6, 8))
+        
+        # Bigram graph
+        ax1 = fig.add_subplot(311)  # 3 rows, 1 column, first plot
+        sentiments = ['positive', 'neutral', 'negative']
+        bigram_values = []
+        for sentiment in sentiments:
+            # Calculate total bigram score for each sentiment
+            total = sum(analyzer.ngram_counts['bigram'][sentiment][bigram] for bigram in bigrams)
+            bigram_values.append(total)
+        
+        total_bigram = sum(bigram_values) or 1
+        bigram_percentages = [v * 100 / total_bigram for v in bigram_values]
+        
+        bars = ax1.bar(np.arange(len(sentiments)), bigram_percentages)
+        ax1.set_xticks(np.arange(len(sentiments)))
+        ax1.set_xticklabels(sentiments)
+        ax1.set_title('Bigram Analysis')
+        ax1.set_ylabel('Percentage (%)')
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}%', ha='center', va='bottom')
+
+        # Trigram graph
+        ax2 = fig.add_subplot(312)  # 3 rows, 1 column, second plot
+        trigram_values = []
+        for sentiment in sentiments:
+            # Calculate total trigram score for each sentiment by summing all trigrams
+            total = sum(
+                analyzer.ngram_counts['trigram'][sentiment][t] 
+                for t in trigrams
+            )
+            trigram_values.append(total)
+        
+        total_trigram = sum(trigram_values) or 1
+        trigram_percentages = [v * 100 / total_trigram for v in trigram_values]
+        
+        bars = ax2.bar(np.arange(len(sentiments)), trigram_percentages)
+        ax2.set_xticks(np.arange(len(sentiments)))
+        ax2.set_xticklabels(sentiments)
+        ax2.set_title('Trigram Analysis')
+        ax2.set_ylabel('Percentage (%)')
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}%', ha='center', va='bottom')
+
+        # Final weighted scores graph
+        ax3 = fig.add_subplot(313)  # 3 rows, 1 column, third plot
+        values = [last_analyzed_scores[method][s] for s in sentiments]
+        
+        bars = ax3.bar(np.arange(len(sentiments)), values)
+        ax3.set_xticks(np.arange(len(sentiments)))
+        ax3.set_xticklabels(sentiments)
+        ax3.set_title('Final Weighted Scores (75% Bigram + 25% Trigram)')
+        ax3.set_ylabel('Score (%)')
+        
+        for bar in bars:
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}%', ha='center', va='bottom')
+
+        # Adjust layout to prevent overlap
+        fig.tight_layout(pad=3.0)
+
+        canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    elif method == 'naive_bayes':
+        formula_text = "P(sentiment|text) = P(sentiment) × ∏ P(word|sentiment)"
+        explanation = "Probability calculation using Bayes' theorem with word frequencies"
+        words = [w for w in last_analyzed_text.lower().split() if w in analyzer.vectorizer.get_feature_names_out()]
+        calc_details = (
+            f"Text analyzed: '{last_analyzed_text}'\n\n"
+            f"Words analyzed: {', '.join(words)}\n\n"
+            f"Class probabilities:\n"
+            f"Positive: {last_analyzed_scores['naive_bayes']['positive']:.2f}%\n"
+            f"Neutral: {last_analyzed_scores['naive_bayes']['neutral']:.2f}%\n"
+            f"Negative: {last_analyzed_scores['naive_bayes']['negative']:.2f}%"
+        )
+
+        # Keep original single graph for naive_bayes
+        graph_frame = ttk.LabelFrame(main_content, text="Visualization")
+        graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        fig = Figure(figsize=(8, 4))
+        ax = fig.add_subplot(111)
+
+        sentiments = ['positive', 'neutral', 'negative']
+        values = [last_analyzed_scores[method][s] for s in sentiments]
+        x = np.arange(len(sentiments))
+        
+        bars = ax.bar(x, values)
+        ax.set_xticks(x)
+        ax.set_xticklabels(sentiments)
+        ax.set_title(f'{method.replace("_", " ").title()} Analysis Scores')
+        ax.set_ylabel('Probability (%)')
+
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}%', ha='center', va='bottom')
+
+        canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+    else:  # SVM
+        formula_text = "f(x) = Σ(αᵢ × K(xᵢ, x) + b)"
+        explanation = "Support Vector Machine with TF-IDF features and RBF kernel"
+        
+        try:
+            # Get the feature names and their TF-IDF values
+            vectorizer = analyzer.svm_model.named_steps['tfidfvectorizer']
+            svm = analyzer.svm_model.named_steps['svc']
+            
+            # Transform the text
+            text_str = str(last_analyzed_text)  # Convert to string explicitly
+            X = vectorizer.transform([text_str])
+            feature_names = vectorizer.get_feature_names_out()
+            
+            # Get only the non-zero features
+            nonzero_indices = X.nonzero()[1]
+            active_features = [feature_names[i] for i in nonzero_indices]
+            active_values = X.data
+            
+            if len(active_features) == 0:
+                calc_details = "No features found in the analyzed text."
+                graph_frame = ttk.LabelFrame(main_content, text="Visualization")
+                graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+                ttk.Label(graph_frame, text="No features to visualize").pack(pady=20)
+            else:
+                # Limit to top 10 features by TF-IDF value
+                if len(active_features) > 10:
+                    top_indices = active_values.argsort()[-10:][::-1]
+                    active_features = [active_features[i] for i in top_indices]
+                    active_values = [active_values[i] for i in top_indices]
+                
+                # Create heatmap data
+                sentiments = ['positive', 'neutral', 'negative']
+                heatmap_data = np.zeros((len(active_features), len(sentiments)))
+                
+                # Calculate the contribution of each feature to each sentiment
+                for i, feature in enumerate(active_features):
+                    feature_vector = np.zeros((1, len(feature_names)))
+                    feature_idx = list(feature_names).index(feature)
+                    feature_vector[0, feature_idx] = 1.0
+                    feature_sparse = vectorizer.transform([feature])  # Pass feature as a list of strings
+                    contributions = svm.predict_proba(feature_sparse)[0]
+                    heatmap_data[i] = contributions * 100
+
+                # Create visualization frame
+                graph_frame = ttk.LabelFrame(main_content, text="Feature Contribution Heatmap")
+                graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+                # Create figure
+                fig = Figure(figsize=(10, max(4, len(active_features) * 0.5)))
+                ax = fig.add_subplot(111)
+                
+                # Create heatmap
+                im = ax.imshow(heatmap_data, 
+                             cmap=plt.cm.get_cmap('bwr_r'),  # Changed to blue-white-red reversed
+                             aspect='auto',
+                             interpolation='nearest',
+                             vmin=0, vmax=100)  # Set fixed range for percentages
+                
+                # Set labels
+                ax.set_xticks(np.arange(len(sentiments)))
+                ax.set_yticks(np.arange(len(active_features)))
+                ax.set_xticklabels(sentiments)
+                ax.set_yticklabels(active_features)
+                
+                # Rotate x labels
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+                
+                # Add colorbar
+                cbar = fig.colorbar(im, ax=ax)
+                cbar.set_label('Contribution (%)')
+                
+                # Add value annotations with custom colors based on sentiment
+                for i in range(len(active_features)):
+                    for j in range(len(sentiments)):
+                        # Choose text color based on background intensity
+                        value = heatmap_data[i, j]
+                        text_color = "white" if value > 50 else "black"
+                        ax.text(j, i, f'{value:.1f}%',
+                               ha="center", va="center", 
+                               color=text_color)
+                
+                # Adjust layout
+                fig.tight_layout()
+                
+                # Create canvas
+                canvas = FigureCanvasTkAgg(fig, master=graph_frame)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+                calc_details = (
+                    f"Text analyzed: '{text_str}'\n\n"
+                    f"Features analyzed: {len(active_features)}\n\n"
+                    f"Top features by TF-IDF value:\n"
+                    + "\n".join([f"• {f}: {v:.4f}" for f, v in zip(active_features, active_values)])
+                    + "\n\nFinal probabilities:\n"
+                    + "\n".join([f"• {s}: {last_analyzed_scores['svm'][s]:.2f}%" 
+                                for s in sentiments])
+                )
+
+        except Exception as e:
+            print(f"Error in SVM visualization: {str(e)}")
+            calc_details = f"Error generating SVM visualization: {str(e)}"
+            graph_frame = ttk.LabelFrame(main_content, text="Error")
+            graph_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            ttk.Label(graph_frame, text=f"Could not generate visualization: {str(e)}").pack(pady=20)
+
+    ttk.Label(formula_frame, text=formula_text, font=("Courier", 10, "bold")).pack(pady=5)
+    ttk.Label(formula_frame, text=explanation, font=("Helvetica", 9, "italic")).pack(pady=5)
+
+    # Live Calculations (Right Column)
+    calc_frame = ttk.LabelFrame(right_column, text="Live Calculations")
+    calc_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+    
+    calc_text = tk.Text(calc_frame, wrap=tk.WORD, height=20, width=50)
+    calc_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+    calc_text.insert(tk.END, calc_details)
+    calc_text.config(state=tk.DISABLED)
 
 def analyze_text():
     global last_analyzed_text, last_analyzed_scores
@@ -890,23 +959,76 @@ def update_svm_details(tab, text, scores):
     fig = Figure(figsize=(10, 6))
     ax = fig.add_subplot(111)
 
-    # Plot SVM scores
-    sentiments = list(scores['svm'].keys())
-    values = [scores['svm'][s] for s in sentiments]
-    x = np.arange(len(sentiments))
+    # Get the feature names and their TF-IDF values
+    vectorizer = analyzer.svm_model.named_steps['tfidfvectorizer']
+    svm = analyzer.svm_model.named_steps['svc']
     
-    bars = ax.bar(x, values)
-    ax.set_xticks(x)
+    # Transform the text
+    X = vectorizer.transform([text])
+    feature_names = vectorizer.get_feature_names_out()
+    
+    # Get only the non-zero features
+    nonzero_indices = X.nonzero()[1]
+    active_features = [feature_names[i] for i in nonzero_indices]
+    active_values = X.data
+    
+    # Limit to top 10 features by TF-IDF value
+    if len(active_features) > 10:
+        top_indices = active_values.argsort()[-10:][::-1]
+        active_features = [active_features[i] for i in top_indices]
+        active_values = [active_values[i] for i in top_indices]
+    
+    # Create heatmap data
+    sentiments = ['positive', 'neutral', 'negative']
+    heatmap_data = np.zeros((len(active_features), len(sentiments)))
+    
+    # Calculate the contribution of each feature to each sentiment
+    for i, feature in enumerate(active_features):
+        feature_idx = list(feature_names).index(feature)
+        feature_vector = np.zeros((1, len(feature_names)))
+        feature_vector[0, feature_idx] = 1.0  # Use binary feature presence instead of TF-IDF value
+        feature_sparse = vectorizer.transform(feature_vector)  # Use transform instead of inverse_transform
+        contributions = svm.predict_proba(feature_sparse)[0]
+        heatmap_data[i] = contributions * 100  # Convert to percentage
+
+    # Normalize the heatmap data to make patterns more visible
+    heatmap_data = (heatmap_data - np.min(heatmap_data)) / (np.max(heatmap_data) - np.min(heatmap_data))
+    
+    # Create figure with specific size ratio
+    fig = Figure(figsize=(10, max(4, len(active_features) * 0.5)))
+    ax = fig.add_subplot(111)
+    
+    # Create heatmap with specific settings
+    im = ax.imshow(heatmap_data, 
+                   cmap='RdYlBu_r',  # Reversed colormap: red for positive, blue for negative
+                   aspect='auto',
+                   interpolation='nearest')  # Use nearest neighbor interpolation
+    
+    # Set labels and title
+    ax.set_xticks(np.arange(len(sentiments)))
+    ax.set_yticks(np.arange(len(active_features)))
     ax.set_xticklabels(sentiments)
-    ax.set_title('SVM Classification Probabilities')
-    ax.set_ylabel('Probability (%)')
-
-    # Add value labels on bars
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-                f'{height:.1f}%', ha='center', va='bottom')
-
+    ax.set_yticklabels(active_features)
+    ax.set_title('SVM Feature Contribution Heatmap')
+    
+    # Rotate x labels for better readability
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    
+    # Add colorbar
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label('Normalized Contribution')
+    
+    # Add value annotations
+    for i in range(len(active_features)):
+        for j in range(len(sentiments)):
+            text = ax.text(j, i, f'{heatmap_data[i, j]:.2f}',
+                         ha="center", va="center",
+                         color="black" if 0.3 <= heatmap_data[i, j] <= 0.7 else "white")
+    
+    # Adjust layout
+    fig.tight_layout()
+    
+    # Create canvas and pack it
     canvas = FigureCanvasTkAgg(fig, master=tab)
     canvas.draw()
     canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
@@ -915,14 +1037,15 @@ def update_svm_details(tab, text, scores):
     details_frame = ttk.LabelFrame(tab, text="SVM Analysis Details")
     details_frame.pack(fill=tk.X, padx=5, pady=5)
     
-    # Get decision function values
-    X = analyzer.svm_model.named_steps['tfidfvectorizer'].transform([text])
-    decision_values = analyzer.svm_model.named_steps['svc'].decision_function(X)
-    
-    ttk.Label(details_frame, text="Decision Function Values:").pack(anchor=tk.W)
-    for i, sentiment in enumerate(sentiments):
+    ttk.Label(details_frame, text="Final SVM Probabilities:").pack(anchor=tk.W)
+    for sentiment, score in scores['svm'].items():
         ttk.Label(details_frame, 
-                 text=f"• {sentiment}: {decision_values[0][i]:.4f}").pack(anchor=tk.W)
+                 text=f"• {sentiment.capitalize()}: {score:.2f}%").pack(anchor=tk.W)
+    
+    ttk.Label(details_frame, text="\nFeature Importance:").pack(anchor=tk.W)
+    for feature, value in zip(active_features, active_values):
+        ttk.Label(details_frame, 
+                 text=f"• {feature}: {value:.4f}").pack(anchor=tk.W)
 
 def add_to_training():
     global last_analyzed_text
