@@ -113,8 +113,8 @@ class SentimentAnalyzer:
             'negative': 0.0
         }
 
-        bigram_weight = 0.75
-        trigram_weight = 0.25
+        bigram_weight = 0.67  # Changed from 0.75
+        trigram_weight = 0.33  # Changed from 0.25
 
         for bigram in bigrams:
             for sentiment in scores_ngram.keys():
@@ -367,7 +367,7 @@ def create_about_tab(tab):
     
     formula = ttk.Label(
         ngram,
-        text="Score = 0.75 × Bigram_Score + 0.25 × Trigram_Score",
+        text="Score = 0.67 × Bigram_Score + 0.33 × Trigram_Score",
         font=("Courier", 10, "bold")
     )
     formula.pack(pady=5)
@@ -376,7 +376,7 @@ def create_about_tab(tab):
     ttk.Label(ngram_types, text="N-gram Types:").pack(anchor="w")
     ttk.Label(ngram_types, text="• Bigrams: Two-word sequences (e.g., 'very good')").pack(anchor="w")
     ttk.Label(ngram_types, text="• Trigrams: Three-word sequences (e.g., 'not very good')").pack(anchor="w")
-    ttk.Label(ngram_types, text="• Weighted combination favors bigrams (75%) over trigrams (25%)").pack(anchor="w")
+    ttk.Label(ngram_types, text="• Weighted combination favors bigrams (67%) over trigrams (33%)").pack(anchor="w")  # Updated text
     ttk.Label(ngram_types, text="• Captures local context and common sentiment expressions").pack(anchor="w")
     ngram_types.pack(pady=5)
     ngram.pack(fill="x", padx=10, pady=5)
@@ -494,7 +494,7 @@ def update_viz_content(frame, method):
     formula_frame.pack(fill=tk.X, pady=5)
 
     if method == 'ngram':
-        formula_text = "Score = 0.75 × Bigram_Score + 0.25 × Trigram_Score"
+        formula_text = "Score = 0.67 × Bigram_Score + 0.33 × Trigram_Score"  # Updated formula
         explanation = "Weighted combination of bigram and trigram frequencies"
         
         # Get all n-grams from the text
@@ -584,8 +584,8 @@ def update_viz_content(frame, method):
         for sentiment in sentiments:
             # Calculate total trigram score for each sentiment by summing all trigrams
             total = sum(
-                analyzer.ngram_counts['trigram'][sentiment][t] 
-                for t in trigrams
+                analyzer.ngram_counts['trigram'][sentiment][trigram] 
+                for trigram in trigrams
             )
             trigram_values.append(total)
         
@@ -610,7 +610,7 @@ def update_viz_content(frame, method):
         bars = ax3.bar(np.arange(len(sentiments)), values)
         ax3.set_xticks(np.arange(len(sentiments)))
         ax3.set_xticklabels(sentiments)
-        ax3.set_title('Final Weighted Scores (75% Bigram + 25% Trigram)')
+        ax3.set_title('Final Weighted Scores (67% Bigram + 33% Trigram)')  # Updated title
         ax3.set_ylabel('Score (%)')
         
         for bar in bars:
